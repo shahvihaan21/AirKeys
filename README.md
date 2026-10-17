@@ -1,146 +1,297 @@
-# ⌨️ AirKey — A Laptop-to-Phone Bluetooth Keyboard
+# ⌨️ AirKeys — Turn Your Laptop into a Bluetooth Keyboard
 
-> **What if your laptop could become your phone's wireless keyboard?**  
-> LaptopKey is an experimental engineering project that explores turning a Windows laptop into a Bluetooth keyboard for an Android phone — no companion app, no Wi-Fi, and no cloud dependency.
+<p align="center">
+  <strong>Your laptop's keyboard. Your phone's screen. No companion app required.</strong>
+</p>
 
-![Project Type](https://img.shields.io/badge/Project-Experimental%20Prototype-orange)
-![Platform](https://img.shields.io/badge/Platform-Windows%20%2B%20Android-blue)
-![Technology](https://img.shields.io/badge/Technology-Bluetooth%20HID-5865F2)
-![Status](https://img.shields.io/badge/Status-Experimental-yellow)
+AirKeys is a Windows-based experimental project that explores turning a laptop into a wireless Bluetooth keyboard for an Android phone or another compatible device. It uses the Bluetooth Human Interface Device (HID) concept so a compatible phone can recognize the laptop as a standard keyboard.
+
+The project combines a practical everyday idea with hands-on work in Bluetooth Low Energy (BLE), HID reports, keyboard event handling, Windows integration, and debugging.
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Platform-Windows-blue" alt="Platform: Windows">
+  <img src="https://img.shields.io/badge/Language-Python-3776AB" alt="Language: Python">
+  <img src="https://img.shields.io/badge/Connectivity-Bluetooth%20LE-5865F2" alt="Connectivity: Bluetooth LE">
+  <img src="https://img.shields.io/badge/Status-Experimental%20Prototype-orange" alt="Status: Experimental prototype">
+</p>
 
 ---
 
-## 🚀 The Idea
+## ✨ Why AirKeys?
 
-Typing long messages on a phone can be tedious, especially when a perfectly good physical keyboard is sitting right in front of you.
+Typing long messages on a phone can be awkward when a physical keyboard is already available. AirKeys explores a way to use that keyboard directly, without installing a dedicated receiver app on the mobile device.
 
-**LaptopKey explores a simple idea: use your laptop's keyboard to type directly on your Android phone over Bluetooth.**
+- ⌨️ **More comfortable typing:** Use your laptop's physical keyboard for mobile text input.
+- 📱 **No phone-side companion app:** The intended workflow uses the phone's built-in support for compatible Bluetooth keyboards.
+- 📡 **Direct wireless connection:** Designed around Bluetooth rather than Wi-Fi or cloud services.
+- 🧪 **Built to learn:** A practical experiment in HID protocols, BLE communication, and Windows system integration.
+- 🎛️ **Convenient controls:** Includes command-line controls and Windows shortcut scripts for managing the service.
 
-Instead of installing a receiver application on the phone or relying on third-party software, the project investigates whether a Windows laptop can present itself as a standard Bluetooth keyboard using Human Interface Device (HID) protocols.
+> **Compatibility note:** This approach depends on the Bluetooth adapter, Windows drivers and APIs, and the receiving device's HID support. Not every Windows laptop supports acting as a BLE keyboard peripheral out of the box.
 
-What started as a small technical experiment became a hands-on exploration of wireless communication, Bluetooth compatibility, protocol implementation, and system-level debugging.
+## 🎬 See It in Action
 
-## 🎯 Project Goals
+The intended experience is simple: enable AirKeys, pair the phone with the advertised Bluetooth keyboard, and type on the laptop.
 
-- ⌨️ **Make typing easier:** Use a laptop's physical keyboard for mobile text input.
-- 🔌 **Reduce dependencies:** Avoid requiring a dedicated Android companion app.
-- 📡 **Explore Bluetooth HID:** Investigate how standard input peripherals communicate with host devices.
-- 🌐 **Keep it local:** Design for direct device-to-device communication without cloud services or internet access.
-- 🧪 **Learn by building:** Turn a practical everyday problem into a focused engineering experiment.
+<!-- Add a real demonstration GIF or screenshot at assets/airkeys-demo.gif to display it here. -->
+<p align="center">
+  <img src="assets/airkeys-demo.gif" alt="AirKeys demonstration: typing on a laptop and receiving text on a phone" width="800">
+</p>
+<p align="center"><em>⌨️ One laptop. One phone. Wireless typing.</em></p>
 
-## 🛠️ How It Works
+**Adding a demo:** Save a short recording or GIF showing actual input being received by the phone as `assets/airkeys-demo.gif`. If you do not have a demo file yet, remove the image block above until one is available; otherwise GitHub will show a broken image.
 
-LaptopKey is based on the concept of Bluetooth HID emulation, with Bluetooth Low Energy (BLE) HID as the intended approach where the hardware and software support it.
+---
 
-The laptop needs to behave like a keyboard peripheral, allowing the Android phone to recognize its input as standard keyboard events.
+## ⚙️ How It Works
 
-### 🔍 Core Technical Components
+AirKeys explores Bluetooth HID emulation, with BLE HID over GATT (HOGP) as its intended peripheral approach.
 
-| Component | Purpose |
+At a high level, the program:
+
+1. 🖥️ Runs on the Windows laptop.
+2. 📡 Advertises a compatible Bluetooth HID keyboard service, where supported.
+3. 📱 Allows a compatible phone or other host to discover and pair with the keyboard.
+4. ⌨️ Captures keyboard input and represents key presses using standard HID keyboard reports.
+5. 🔁 Provides runtime controls to pause forwarding or shut down cleanly.
+
+Bluetooth discovery and pairing alone are not enough: the laptop must expose the right peripheral role and a compatible HID service, and the phone must accept the resulting keyboard input.
+
+### 🧩 Technical Components
+
+| Component | Role |
 |---|---|
-| 📡 Bluetooth HID | Provides the standard interface for keyboard input. |
-| ⚡ Bluetooth Low Energy (BLE) | Explores a low-energy wireless communication approach. |
-| ⌨️ Keystroke handling | Converts keyboard actions into input events. |
-| 🤝 Connection management | Investigates device discovery, pairing, and connection behavior. |
-| 🐛 Debugging | Troubleshoots connection handshakes, input delivery, and responsiveness. |
-| 🔒 Local communication | Avoids reliance on external servers or cloud infrastructure. |
-
-### ⚠️ An Important Technical Detail
-
-Bluetooth connectivity alone does not make a device a keyboard. The laptop must support the appropriate Bluetooth peripheral role and expose a compatible HID implementation.
-
-Standard Windows Bluetooth interfaces do not automatically provide every capability required to emulate a BLE HID peripheral. Hardware, drivers, operating-system support, and the implementation itself all affect compatibility.
-
-This distinction became an important part of understanding the problem.
-
-## 🧑‍💻 The Development Journey
-
-### 1. 🧠 Concept & Protocol Research
-
-The first step was figuring out whether a laptop could act as a Bluetooth keyboard rather than simply connect to one.
-
-This meant exploring the difference between Bluetooth hosts and peripherals, understanding the role of HID, and investigating how Android recognizes external keyboards.
-
-The objective was to find a path that would not require a custom receiver application on the phone.
-
-### 2. ⚙️ Prototyping & Experimentation
-
-With the basic concept established, I moved into implementation and hands-on testing.
-
-The focus was on exploring the Bluetooth connection, transmitting keyboard input, and making the overall interaction practical for everyday typing.
-
-⏱️ **Recorded development time:**
-- Approximately 30 minutes for the initial prototype.
-- Approximately 20 minutes for active troubleshooting.
-
-A short project, but one that involved several layers of system-level behavior.
-
-### 3. 🧪 Real-World Testing
-
-The real test was not simply whether the devices could discover each other — it was whether the laptop could actually be used to type on the phone.
-
-The development notes record that this very description was typed on a mobile phone using the program, demonstrating the intended workflow in the tested setup.
-
-That was the most satisfying part of the experiment: taking a technical concept and putting it to practical use.
-
-## 🏆 Key Outcomes
-
-- 💡 Explored the concept of repurposing a Windows laptop as a wireless keyboard.
-- 📡 Investigated Bluetooth HID and BLE-based input communication.
-- ⚙️ Built and tested an experimental prototype in a short development session.
-- 🐛 Worked through connectivity, handshake, and responsiveness issues.
-- 📱 Recorded a practical demonstration of mobile text input using the program.
-
-## 🧩 Challenges & Lessons Learned
-
-The project revealed that something as ordinary as a Bluetooth keyboard involves several layers of compatibility that are easy to overlook.
-
-**Key lessons:**
-
-- **Bluetooth is more than pairing.** Devices must support the appropriate roles and protocols to exchange useful input.
-- **Hardware and software matter.** Bluetooth adapters, drivers, Windows capabilities, and Android implementations can affect whether the approach works.
-- **A connection is not proof of functionality.** Successful discovery or pairing does not guarantee that keyboard events will reach the receiving device.
-- **Real-world testing matters.** A working demonstration is useful, but it does not establish universal compatibility or long-term reliability.
-- **Small projects can teach complex concepts.** Even a focused experiment can involve protocol research, debugging, and system integration.
-
-## 📍 Current Status
-
-**Status: Experimental prototype — functionality demonstrated in a recorded test setup.**
-
-LaptopKey was built as a proof of concept, not as a fully packaged application with guaranteed compatibility across all devices.
-
-The experiment focused on exploring and demonstrating laptop-to-phone keyboard input over Bluetooth. Broader compatibility testing, setup simplification, and long-term reliability remain areas for further development.
-
-## 🔮 What's Next?
-
-If development resumes, these are some possible improvements:
-
-- 🔄 More reliable Bluetooth pairing and automatic reconnection.
-- ⌨️ Better support for modifier keys, shortcuts, and special characters.
-- 🌍 Compatibility testing across different Android devices and Bluetooth adapters.
-- 🖥️ A lightweight interface for connecting, disconnecting, and viewing connection status.
-- 📖 Clear setup instructions and reproducible testing steps.
-- 🧰 Improved error handling and connection diagnostics.
-
-## 🧠 Why This Project Matters
-
-LaptopKey was not about building another keyboard application. It was about exploring whether an existing device could take on a completely different role using standard wireless protocols.
-
-The project offered practical exposure to Bluetooth communication, HID concepts, compatibility constraints, and system-level debugging — all through a simple, everyday problem.
-
-Sometimes, the most interesting engineering experiments start with a question that sounds almost too simple.
-
-**Can your laptop become your phone's keyboard? LaptopKey explores that possibility.** 🚀
+| Bluetooth HID / HOGP | Describes how a compatible host recognizes keyboard input over BLE. |
+| BLE service | Handles the Bluetooth HID-over-GATT service through supported Windows APIs. |
+| HID reports | Encodes key presses, releases, and modifier keys into keyboard reports. |
+| Keyboard event handling | Captures local keyboard events for forwarding. |
+| Runtime controls | Manages activation, deactivation, status, and clean shutdown. |
+| Diagnostics and tests | Helps check adapter support and validate key-report and CLI behavior. |
 
 ---
 
-### 🤝 Project Notes
+## 🧰 Requirements
 
-- **Project name:** LaptopKey
-- **Project type:** Personal engineering experiment
+- **Operating system:** Windows 10 (version 1703 or later) or Windows 11, 64-bit
+- **Python:** 3.10 or newer
+- **Bluetooth adapter:** Must support the required BLE peripheral role and work with the implementation
+- **Receiving device:** Android 5.0+ or another device that supports compatible Bluetooth HID keyboards
+- **Dependencies:** Installed from `requirements.txt`
+
+Support for iOS, smart TVs, PCs, and other BLE HID-compatible devices may vary. The requirements above do not guarantee compatibility with every adapter or device.
+
+## 🚀 Installation
+
+### 1. Get the project
+
+Clone the repository, or download and extract its source code. Open a terminal in the project directory.
+
+### 2. Create and activate a virtual environment (recommended)
+
+```powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+If PowerShell blocks activation due to its execution policy, use an approved activation method for your environment or run the commands through Command Prompt instead.
+
+### 3. Install dependencies
+
+```powershell
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### 4. Check Bluetooth capability
+
+```powershell
+python cli.py check
+```
+
+Run this check before troubleshooting pairing. If the adapter or Windows environment does not support the required BLE peripheral behavior, the project may not be able to operate on that machine without a different supported implementation or hardware.
+
+---
+
+## ⚡ Quick Start: Control AirKeys
+
+AirKeys provides command-line controls and Windows shortcut scripts.
+
+### Common commands
+
+Run these commands from the project root:
+
+```powershell
+python cli.py on
+python cli.py status
+python cli.py off
+```
+
+| Command | What it does |
+|---|---|
+| `python cli.py on` | Starts AirKeys in the background. |
+| `python cli.py off` | Requests a clean shutdown. |
+| `python cli.py switch` | Toggles AirKeys on or off. |
+| `python cli.py status` | Checks service status and active process information. |
+| `python cli.py check` | Checks Bluetooth BLE support. |
+| `python cli.py logs` | Displays recent diagnostic logs. |
+| `python cli.py restart` | Restarts the service. |
+
+### 🖱️ One-click Windows shortcuts
+
+The `scripts/` folder includes shortcuts for common actions:
+
+- `scripts/on.bat` — turn AirKeys on
+- `scripts/off.bat` — turn AirKeys off
+- `scripts/switch.bat` — toggle on/off
+- `scripts/status.bat` — check status
+
+Double-click the relevant `.bat` file to run its action. You can also use the command-line interface for the same controls.
+
+### 🎛️ Interactive switch
+
+To open the interactive console switch, run:
+
+```powershell
+python cli.py switch -i
+```
+
+The standalone helper is also available:
+
+```powershell
+python scripts/switch.py -i
+```
+
+---
+
+## 📱 Pair Your Phone
+
+1. **Start AirKeys** using `python cli.py on` or `scripts/switch.bat`.
+2. On your phone, open **Settings → Bluetooth** (the exact menu name varies by device).
+3. Choose **Pair new device** or the equivalent discovery option.
+4. Select **LaptopKey** or the Bluetooth name advertised by your implementation.
+5. If Windows displays a pairing or connection prompt, review it and allow the connection when appropriate.
+6. Open a text field on the phone and try typing on the laptop keyboard.
+
+Once connected successfully, the phone should recognize the device as a physical keyboard. The advertised name may differ depending on the current configuration.
+
+**If it does not work:** run `python cli.py check`, verify that the adapter supports the required BLE peripheral role, confirm that AirKeys is running, and check the logs. A successful Bluetooth pairing does not necessarily mean HID input is being delivered correctly.
+
+---
+
+## 🎹 Runtime Controls
+
+While AirKeys is running, the implementation provides these controls:
+
+| Key / command | Action |
+|---|---|
+| `F12` | Toggles keyboard forwarding on or off without disconnecting Bluetooth. |
+| `Scroll Lock` | Initiates a clean exit, releases held keys, removes the keyboard hook, and stops BLE advertising. |
+| `python cli.py off` | Requests a graceful shutdown of the background service. |
+
+These controls are implementation-specific and may depend on the active configuration and runtime environment.
+
+---
+
+## 🧪 Run the Tests
+
+Run the automated test suite from the project root:
+
+```powershell
+python -m unittest discover tests
+```
+
+The test suite includes checks for HID report encoding and modifier handling, as well as CLI state and process-management behavior.
+
+Tests can help validate individual components, but they do not replace testing with the actual Bluetooth adapter and receiving device.
+
+---
+
+## 📂 Project Structure
+
+```text
+AirKeys/
+├── docs/
+│   ├── feasibility.md          # Windows Bluetooth and HOGP feasibility notes
+│   └── reverse_engineering.md  # BLE HID protocol and scancode research
+├── scripts/
+│   ├── off.bat                 # Turn AirKeys off
+│   ├── on.bat                  # Turn AirKeys on
+│   ├── status.bat              # Check service status
+│   ├── switch.bat              # Toggle on/off
+│   └── switch.py               # Interactive/CLI switch helper
+├── src/
+│   ├── __init__.py
+│   ├── ble_hid_service.py      # BLE HID-over-GATT service
+│   ├── hid_report.py           # HID keyboard reports and scancodes
+│   └── main.py                 # Keyboard capture and runtime management
+├── tests/
+│   ├── __init__.py
+│   ├── test_cli.py             # CLI and process-management tests
+│   └── test_hid_report.py      # HID report and modifier tests
+├── assets/
+│   └── airkeys-demo.gif        # Optional project demonstration
+├── cli.py                      # Main command-line interface
+├── requirements.txt            # Python dependencies
+└── README.md                   # Project documentation
+```
+
+The `assets/` folder and demo GIF are optional additions for the README; create them only when you have a real screenshot or recording to include.
+
+---
+
+## 🧠 Development Journey & Lessons Learned
+
+AirKeys began with a practical question: could a laptop act as a keyboard for a phone instead of merely connecting to a keyboard?
+
+The experiment involved researching the difference between Bluetooth host and peripheral roles, exploring HID behavior, working with key reports, and troubleshooting connection and input delivery.
+
+The development notes for the original LaptopKey experiment record an initial prototype session of approximately 30 minutes and around 20 minutes of active troubleshooting. They also record a practical test in which text was typed on a phone using the program. These are observations from that experiment, not a claim of universal compatibility or production readiness.
+
+### Key takeaways
+
+- **Pairing is not the same as input:** The correct Bluetooth role and HID service must be available.
+- **Hardware support matters:** Adapters, drivers, and operating-system APIs can determine whether peripheral emulation is possible.
+- **Protocol details matter:** Key presses, releases, and modifier states must be encoded and handled consistently.
+- **Test on real devices:** Unit tests are useful, but real Bluetooth behavior needs hardware testing.
+- **Small experiments can teach a lot:** A simple convenience idea can lead to meaningful work in wireless communication and system integration.
+
+## 🛣️ Possible Next Steps
+
+- 🔄 Improve pairing and reconnection reliability.
+- ⌨️ Expand keyboard-layout, shortcut, modifier, and special-character handling.
+- 📱 Test across more Android versions, phones, and Bluetooth adapters.
+- 🖥️ Add a lightweight status interface for connecting and disconnecting.
+- 📖 Improve setup guidance and reproducible troubleshooting.
+- 🧪 Expand automated tests and document hardware-specific limitations.
+
+These are potential improvements, not features guaranteed to be available in the current prototype.
+
+---
+
+## 🤝 Contributing & Feedback
+
+This is an experimental personal engineering project. If you try it on a different Windows machine or Bluetooth adapter, useful feedback includes:
+
+- Windows version and Bluetooth adapter model
+- Receiving device and operating-system version
+- Whether the device can discover and pair with AirKeys
+- Whether keyboard input works after pairing
+- Any relevant diagnostic output, with personal information removed
+
+Please avoid reporting a device as supported based on Bluetooth discovery alone; successful keyboard input is the meaningful test.
+
+## 📌 Project Details
+
+- **Name:** AirKeys
 - **Category:** Bluetooth HID emulation, wireless communication, system integration
-- **Target devices:** Windows laptop and Android phone
-- **Implementation status:** Experimental proof of concept
+- **Primary platform:** Windows
+- **Implementation language:** Python
+- **Target experience:** Use a laptop keyboard to enter text on a compatible mobile device
+- **Status:** Experimental prototype
 
-*Built out of curiosity, tested through experimentation, and driven by the satisfaction of making everyday technology do something different.*
+---
 
+<p align="center">
+  <strong>Built out of curiosity. Tested through experimentation. ⌨️📡</strong><br>
+  <em>Making everyday devices do something a little more interesting.</em>
+</p>
