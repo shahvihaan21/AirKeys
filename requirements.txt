@@ -1,0 +1,10 @@
+# LaptopKey Dependencies
+pynput>=1.7.7
+winrt-runtime>=3.2.1
+winrt-Windows.Devices.Bluetooth>=3.2.1
+winrt-Windows.Devices.Bluetooth.Advertisement>=3.2.1
+winrt-Windows.Devices.Bluetooth.GenericAttributeProfile>=3.2.1
+winrt-Windows.Devices.Enumeration>=3.2.1
+winrt-Windows.Storage.Streams>=3.2.1
+winrt-Windows.Foundation>=3.2.1
+winrt-Windows.Foundation.Collections>=3.2.1

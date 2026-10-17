@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# AirKeys / LaptopKey Runtime & Logs
+.laptopkey.pid
+.laptopkey.stop
+*.log
+laptopkey.log
+
+# Local Notes & Drafts (keep local only)
+AirKeys Description.md
+*Description.md
+BT- PHONE.md
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
