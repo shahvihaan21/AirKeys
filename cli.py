@@ -28,7 +28,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-# Directory and file paths
+
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 MAIN_PY = os.path.join(ROOT_DIR, "src", "main.py")
 PID_FILE = os.path.join(ROOT_DIR, ".laptopkey.pid")
