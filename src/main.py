@@ -68,13 +68,32 @@ _ble_service: BleHidService | None = None
 _loop: asyncio.AbstractEventLoop | None = None
 _exit_event = threading.Event()
 _is_forwarding_enabled = True  # Can be toggled on/off with F12
+_report_lock = threading.RLock()
+_pending_sends = set()
 
 
 def _schedule_send(report: bytes):
-    """Thread-safe: schedule send_report on the asyncio event loop."""
+    """Queue a report and surface asynchronous failures instead of losing them."""
     if _loop is None or _ble_service is None or _loop.is_closed():
+        log.warning("Dropped HID report because the BLE event loop is unavailable.")
         return
-    asyncio.run_coroutine_threadsafe(_ble_service.send_report(report), _loop)
+    future = asyncio.run_coroutine_threadsafe(_ble_service.send_report(report), _loop)
+    _pending_sends.add(future)
+
+    def _completed(done):
+        _pending_sends.discard(done)
+        try:
+            sent = done.result()
+            if not sent and _ble_service and _ble_service.has_subscribers:
+                log.warning("HID report was not delivered; clearing pressed-key state.")
+                with _report_lock:
+                    _report_builder.release_all()
+        except Exception:
+            log.exception("HID report task failed.")
+            with _report_lock:
+                _report_builder.release_all()
+
+    future.add_done_callback(_completed)
 
 
 def _toggle_forwarding():
@@ -85,7 +104,8 @@ def _toggle_forwarding():
         log.info("▶ FORWARDING ON: Keystrokes are now sent to Phone (Press F12 to mute)")
     else:
         # Release all active keys on phone so nothing gets stuck
-        _schedule_send(_report_builder.release_all())
+        with _report_lock:
+            _schedule_send(_report_builder.release_all())
         log.info("⏸ FORWARDING MUTED: Keystrokes stay on Laptop (Press F12 to resume)")
 
 
@@ -101,12 +121,13 @@ def _on_key_press(key):
         return
 
     mod_bit, scancode = pynput_key_to_scancode(key)
-    if mod_bit is not None:
-        report = _report_builder.press_modifier(mod_bit)
-    elif scancode is not None:
-        report = _report_builder.press_key(scancode)
-    else:
+    if scancode is None and mod_bit is None:
         return  # unmapped key
+    with _report_lock:
+        if scancode is None:
+            report = _report_builder.press_modifier(mod_bit)
+        else:
+            report = _report_builder.press_key(scancode, mod_bit or 0)
     _schedule_send(report)
 
 
@@ -125,12 +146,13 @@ def _on_key_release(key):
         return
 
     mod_bit, scancode = pynput_key_to_scancode(key)
-    if mod_bit is not None:
-        report = _report_builder.release_modifier(mod_bit)
-    elif scancode is not None:
-        report = _report_builder.release_key(scancode)
-    else:
+    if scancode is None and mod_bit is None:
         return  # unmapped key
+    with _report_lock:
+        if scancode is None:
+            report = _report_builder.release_modifier(mod_bit)
+        else:
+            report = _report_builder.release_key(scancode)
     _schedule_send(report)
 
 
@@ -165,6 +187,8 @@ async def _main():
             log.info("✓ Phone CONNECTED & SUBSCRIBED! Keyboard is live.")
         else:
             log.info("Phone disconnected or unsubscribed.")
+            with _report_lock:
+                _report_builder.release_all()
 
     _ble_service = BleHidService(on_subscriber_change=on_subscriber_change)
     try:
@@ -219,7 +243,9 @@ async def _main():
         listener.stop()
         if _ble_service:
             try:
-                await _ble_service.send_report(_report_builder.release_all())
+                with _report_lock:
+                    release_report = _report_builder.release_all()
+                await _ble_service.send_report(release_report)
                 await _ble_service.stop()
             except Exception as e:
                 log.warning(f"Error during BLE shutdown: {e}")

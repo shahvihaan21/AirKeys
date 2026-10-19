@@ -1,4 +1,4 @@
-# Windows Feasibility Audit — LaptopKey (Phase 2)
+# Windows Feasibility Audit — AirKeys (Phase 2)
 
 ## 1. System Environment
 

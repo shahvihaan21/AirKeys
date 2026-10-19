@@ -22,6 +22,7 @@ from hid_report import (
     MOD_LEFT_SHIFT,
     MOD_LEFT_CTRL,
     MOD_RIGHT_ALT,
+    SHIFTED_CHARACTERS,
 )
 
 
@@ -87,8 +88,36 @@ class TestKeyTranslation(unittest.TestCase):
         mock_key = MagicMock()
         mock_key.char = "H"
         mod, sc = pynput_key_to_scancode(mock_key)
-        self.assertIsNone(mod)
+        self.assertEqual(mod, MOD_LEFT_SHIFT)
         self.assertEqual(sc, SCAN["h"])
+
+    def test_shifted_symbols_use_us_key_position_and_shift(self):
+        for character, unshifted in SHIFTED_CHARACTERS.items():
+            with self.subTest(character=character):
+                key = MagicMock()
+                key.char = character
+                modifier, scancode = pynput_key_to_scancode(key)
+                self.assertEqual(modifier, MOD_LEFT_SHIFT)
+                self.assertEqual(scancode, SCAN[unshifted])
+
+    def test_digits_and_unshifted_punctuation_do_not_add_shift(self):
+        for character in "0123456789-=[]\\;',./`":
+            with self.subTest(character=character):
+                key = MagicMock()
+                key.char = character
+                self.assertEqual(pynput_key_to_scancode(key), (None, SCAN[character]))
+
+    def test_unsupported_character_is_safely_ignored(self):
+        key = MagicMock()
+        key.char = "€"
+        self.assertEqual(pynput_key_to_scancode(key), (None, None))
+
+    def test_temporary_shift_does_not_clear_physical_modifier(self):
+        builder = HidReportBuilder()
+        builder.press_modifier(MOD_LEFT_CTRL)
+        report = builder.press_key(SCAN["1"], MOD_LEFT_SHIFT)
+        self.assertEqual(report[0], MOD_LEFT_CTRL | MOD_LEFT_SHIFT)
+        self.assertEqual(builder.release_key(SCAN["1"])[0], MOD_LEFT_CTRL)
 
     def test_modifier_key(self):
         from pynput.keyboard import Key

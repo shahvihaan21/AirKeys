@@ -33,13 +33,7 @@ Typing long messages on a phone can be awkward when a physical keyboard is alrea
 
 The intended experience is simple: enable AirKeys, pair the phone with the advertised Bluetooth keyboard, and type on the laptop.
 
-<!-- Add a real demonstration GIF or screenshot at assets/airkeys-demo.gif to display it here. -->
-<p align="center">
-  <img src="assets/airkeys-demo.gif" alt="AirKeys demonstration: typing on a laptop and receiving text on a phone" width="800">
-</p>
-<p align="center"><em>⌨️ One laptop. One phone. Wireless typing.</em></p>
-
-**Adding a demo:** Save a short recording or GIF showing actual input being received by the phone as `assets/airkeys-demo.gif`. If you do not have a demo file yet, remove the image block above until one is available; otherwise GitHub will show a broken image.
+No verified demo recording is currently included. This avoids a broken image and does not imply device compatibility that has not been independently reproduced.
 
 ---
 
@@ -176,7 +170,7 @@ python scripts/switch.py -i
 1. **Start AirKeys** using `python cli.py on` or `scripts/switch.bat`.
 2. On your phone, open **Settings → Bluetooth** (the exact menu name varies by device).
 3. Choose **Pair new device** or the equivalent discovery option.
-4. Select **LaptopKey** or the Bluetooth name advertised by your implementation.
+4. Select **AirKeys** or the Bluetooth name advertised by your Windows implementation.
 5. If Windows displays a pairing or connection prompt, review it and allow the connection when appropriate.
 6. Open a text field on the phone and try typing on the laptop keyboard.
 
@@ -185,6 +179,12 @@ Once connected successfully, the phone should recognize the device as a physical
 **If it does not work:** run `python cli.py check`, verify that the adapter supports the required BLE peripheral role, confirm that AirKeys is running, and check the logs. A successful Bluetooth pairing does not necessarily mean HID input is being delivered correctly.
 
 ---
+
+## 🔒 Bluetooth security and limitations
+
+AirKeys configures the HID Information, Report Map, Control Point, Protocol Mode, Input Report, and Report Reference characteristics to require an authenticated, encrypted Bluetooth LE connection. Keyboard reports are sent only to subscribed clients; Windows is expected to reject access that cannot satisfy the protected GATT subscription. Confirm this on the target adapter and phone using the release checklist below.
+
+Windows' `GattServiceProvider` API does not expose a reliable application-level allowlist, bond store, peer identity, or per-notification authorization callback for local GATT services. AirKeys therefore relies on Windows Bluetooth pairing/authentication and characteristic protection; it cannot independently prove a specific bonded phone is the recipient. Do not use it for sensitive input until pairing and reconnection have been checked on the target adapter and phone.
 
 ## 🎹 Runtime Controls
 
@@ -212,6 +212,14 @@ The test suite includes checks for HID report encoding and modifier handling, as
 
 Tests can help validate individual components, but they do not replace testing with the actual Bluetooth adapter and receiving device.
 
+### Manual real-device release checklist
+
+- Confirm an unpaired phone cannot subscribe to or receive keyboard input; complete the OS pairing flow and confirm reports work only after pairing.
+- Type lowercase and uppercase letters, digits, `! @ # $ % ^ & * ( )`, punctuation, and Ctrl/Alt/Shift combinations in a phone text field.
+- Disconnect Bluetooth while holding a key, reconnect, and confirm no key remains logically held before typing again.
+- Stop and restart AirKeys, then confirm the phone can reconnect and typing resumes without reusing stale key state.
+- Repeat with the phone's intended keyboard layout. HID keyboard usages represent US physical key positions; the phone layout determines the displayed character.
+
 ---
 
 ## 📂 Project Structure
@@ -236,14 +244,10 @@ AirKeys/
 │   ├── __init__.py
 │   ├── test_cli.py             # CLI and process-management tests
 │   └── test_hid_report.py      # HID report and modifier tests
-├── assets/
-│   └── airkeys-demo.gif        # Optional project demonstration
 ├── cli.py                      # Main command-line interface
 ├── requirements.txt            # Python dependencies
 └── README.md                   # Project documentation
 ```
-
-The `assets/` folder and demo GIF are optional additions for the README; create them only when you have a real screenshot or recording to include.
 
 ---
 
@@ -253,7 +257,7 @@ AirKeys began with a practical question: could a laptop act as a keyboard for a 
 
 The experiment involved researching the difference between Bluetooth host and peripheral roles, exploring HID behavior, working with key reports, and troubleshooting connection and input delivery.
 
-The development notes for the original LaptopKey experiment record an initial prototype session of approximately 30 minutes and around 20 minutes of active troubleshooting. They also record a practical test in which text was typed on a phone using the program. These are observations from that experiment, not a claim of universal compatibility or production readiness.
+The development notes for the original AirKeys experiment record an initial prototype session of approximately 30 minutes and around 20 minutes of active troubleshooting. They also record a practical test in which text was typed on a phone using the program. These are observations from that experiment, not a claim of universal compatibility or production readiness.
 
 ### Key takeaways
 

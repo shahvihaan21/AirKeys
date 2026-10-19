@@ -86,6 +86,17 @@ SCAN = {
     'caps_lock': 0x39, 'insert': 0x49,
 }
 
+# Characters produced by the US keyboard usages above that require Shift.  HID
+# sends key *positions*, not Unicode characters: the receiving host applies its
+# selected keyboard layout.  Keep this table explicit rather than guessing for
+# arbitrary Unicode input.
+SHIFTED_CHARACTERS = {
+    "!": "1", "@": "2", "#": "3", "$": "4", "%": "5",
+    "^": "6", "&": "7", "*": "8", "(": "9", ")": "0",
+    "_": "-", "+": "=", "{": "[", "}": "]", "|": "\\",
+    ":": ";", '"': "'", "~": "`", "<": ",", ">": ".", "?": "/",
+}
+
 # pynput Key enum name → our key name (for special keys)
 PYNPUT_SPECIAL_MAP = {
     'Key.enter':      'enter',
@@ -147,13 +158,20 @@ class HidReportBuilder:
         self._modifiers &= ~mod_bit
         return self._build()
 
-    def press_key(self, scancode: int) -> bytes:
+    def press_key(self, scancode: int, modifiers: int = MOD_NONE) -> bytes:
         """Add a scancode and return the updated report."""
+        # ``modifiers`` is intentionally only applied to this report.  This is
+        # for characters such as ``!`` and uppercase letters; it must not alter
+        # the physical modifier state maintained by press_modifier().
+        original_modifiers = self._modifiers
+        self._modifiers |= modifiers
         if scancode not in self._keys:
             if len(self._keys) >= 6:
                 self._keys.pop(0)  # roll over — drop oldest
             self._keys.append(scancode)
-        return self._build()
+        report = self._build()
+        self._modifiers = original_modifiers
+        return report
 
     def release_key(self, scancode: int) -> bytes:
         """Remove a scancode and return the updated report."""
@@ -180,8 +198,9 @@ class HidReportBuilder:
 def pynput_key_to_scancode(key) -> tuple[int | None, int | None]:
     """
     Convert a pynput key event to (modifier_bit, scancode).
-    Returns (modifier_bit, None) for modifier keys.
-    Returns (None, scancode) for regular keys.
+    Returns (modifier_bit, None) for physical modifier keys.
+    Returns (modifier_bit, scancode) for a character that needs a temporary
+    modifier (for example ``A`` or ``!``), otherwise (None, scancode).
     Returns (None, None) for unmapped keys.
     """
     key_str = str(key)
@@ -201,8 +220,14 @@ def pynput_key_to_scancode(key) -> tuple[int | None, int | None]:
     try:
         char = key.char
         if char is not None:
-            sc = SCAN.get(char.lower())
-            return (None, sc)
+            if len(char) != 1:
+                return (None, None)
+            if "A" <= char <= "Z":
+                return (MOD_LEFT_SHIFT, SCAN.get(char.lower()))
+            unshifted = SHIFTED_CHARACTERS.get(char)
+            if unshifted is not None:
+                return (MOD_LEFT_SHIFT, SCAN[unshifted])
+            return (None, SCAN.get(char))
     except AttributeError:
         pass
 

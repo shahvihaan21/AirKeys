@@ -71,6 +71,12 @@ class BleHidService:
         self._on_subscriber_change = on_subscriber_change
         self._is_advertising = False
         self._has_subscribers = False
+        self._send_lock: Optional[asyncio.Lock] = None
+
+    @staticmethod
+    def _secure_protection_level():
+        """Require an authenticated, encrypted LE link for HID interaction."""
+        return GattProtectionLevel.ENCRYPTION_AND_AUTHENTICATION_REQUIRED
 
     # ---- Public API ----
 
@@ -108,19 +114,25 @@ class BleHidService:
         Send an 8-byte keyboard HID report to connected host(s).
         Returns True if at least one notification was sent.
         """
+        if len(report) != 8:
+            raise ValueError("HID keyboard reports must be exactly 8 bytes.")
         if self._input_report_char is None:
             log.warning("Input report characteristic not initialized.")
             return False
-        try:
-            buf = _write_bytes(report)
-            subscribers = self._input_report_char.subscribed_clients
-            if subscribers is None or subscribers.size == 0:
+        if self._send_lock is None:
+            self._send_lock = asyncio.Lock()
+        async with self._send_lock:
+            try:
+                subscribers = self._input_report_char.subscribed_clients
+                if subscribers is None or subscribers.size == 0:
+                    return False
+                await self._input_report_char.notify_value_async(_write_bytes(report))
+                return True
+            except Exception as e:
+                # A disconnected host can fail between the subscription check
+                # and notification.  Return a result that callers must handle.
+                log.error("Failed to send HID report: %s", e)
                 return False
-            await self._input_report_char.notify_value_async(buf)
-            return True
-        except Exception as e:
-            log.error(f"Failed to send report: {e}")
-            return False
 
     @property
     def has_subscribers(self) -> bool:
@@ -145,7 +157,7 @@ class BleHidService:
         # 1. HID Information (0x2A4A) — Read
         params = GattLocalCharacteristicParameters()
         params.characteristic_properties = GattCharacteristicProperties.READ
-        params.read_protection_level = GattProtectionLevel.PLAIN
+        params.read_protection_level = self._secure_protection_level()
         # bcdHID = 1.11, bCountryCode = 0, Flags = 0x02 (normally connectable)
         params.static_value = _write_bytes(bytes([0x11, 0x01, 0x00, 0x02]))
         r = await service.create_characteristic_async(UUID_HID_INFORMATION, params)
@@ -156,7 +168,7 @@ class BleHidService:
         # 2. Report Map (0x2A4B) — Read
         params = GattLocalCharacteristicParameters()
         params.characteristic_properties = GattCharacteristicProperties.READ
-        params.read_protection_level = GattProtectionLevel.PLAIN
+        params.read_protection_level = self._secure_protection_level()
         params.static_value = _write_bytes(KEYBOARD_REPORT_MAP)
         r = await service.create_characteristic_async(UUID_REPORT_MAP, params)
         if r.characteristic is None:
@@ -166,7 +178,7 @@ class BleHidService:
         # 3. HID Control Point (0x2A4C) — Write Without Response
         params = GattLocalCharacteristicParameters()
         params.characteristic_properties = GattCharacteristicProperties.WRITE_WITHOUT_RESPONSE
-        params.write_protection_level = GattProtectionLevel.PLAIN
+        params.write_protection_level = self._secure_protection_level()
         r = await service.create_characteristic_async(UUID_HID_CONTROL_POINT, params)
         if r.characteristic is None:
             raise RuntimeError("Failed to create HID Control Point characteristic.")
@@ -178,8 +190,8 @@ class BleHidService:
             GattCharacteristicProperties.READ |
             GattCharacteristicProperties.WRITE_WITHOUT_RESPONSE
         )
-        params.read_protection_level = GattProtectionLevel.PLAIN
-        params.write_protection_level = GattProtectionLevel.PLAIN
+        params.read_protection_level = self._secure_protection_level()
+        params.write_protection_level = self._secure_protection_level()
         # Protocol Mode: 0x01 = Report Protocol
         params.static_value = _write_bytes(bytes([0x01]))
         r = await service.create_characteristic_async(UUID_PROTOCOL_MODE, params)
@@ -194,7 +206,10 @@ class BleHidService:
             GattCharacteristicProperties.READ |
             GattCharacteristicProperties.NOTIFY
         )
-        params.read_protection_level = GattProtectionLevel.PLAIN
+        # Windows enforces this protection level for access to the local
+        # characteristic/CCCD.  Reports are never notified until a client has
+        # subscribed, so an unauthenticated client cannot receive them.
+        params.read_protection_level = self._secure_protection_level()
         r = await service.create_characteristic_async(UUID_REPORT, params)
         if r.characteristic is None:
             raise RuntimeError("Failed to create Input Report characteristic.")
@@ -202,7 +217,7 @@ class BleHidService:
 
         # Add Report Reference descriptor (Report ID=0, Type=Input=1)
         desc_params = GattLocalDescriptorParameters()
-        desc_params.read_protection_level = GattProtectionLevel.PLAIN
+        desc_params.read_protection_level = self._secure_protection_level()
         desc_params.static_value = _write_bytes(bytes([0x00, 0x01]))
         dr = await self._input_report_char.create_descriptor_async(
             UUID_REPORT_REFERENCE, desc_params

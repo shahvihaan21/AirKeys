@@ -108,7 +108,7 @@ The descriptor in `Constants.kt` defines three Report IDs over Classic Bluetooth
 ---
 
 ## 3. Architecture & Technical Differences from Windows
-| Dimension | BtRemote (Android) | Windows Target (LaptopKey) |
+| Dimension | BtRemote (Android) | Windows Target (AirKeys) |
 |---|---|---|
 | **OS Role** | Android acting as Bluetooth Peripheral (HID Device) | Windows acting as Bluetooth Peripheral (HID Device) |
 | **API Mechanism** | High-level Java/Kotlin framework API: `android.bluetooth.BluetoothHidDevice` (Android 9+) | Windows does **NOT** provide a public Win32 or WinRT API for Bluetooth HID Device profile (Peripheral role over BR/EDR or GATT HID Service Peripheral). Windows Bluetooth stack is strictly engineered as a HID **Host** (Central). |
