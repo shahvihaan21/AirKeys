@@ -1,5 +1,5 @@
 """
-main.py — LaptopKey: Turn your laptop keyboard into a Bluetooth keyboard for Android
+main.py — AirKeys: Turn your laptop keyboard into a Bluetooth keyboard for mobile devices
 
 Orchestrates:
   1. BLE HID service (ble_hid_service.py)
@@ -40,15 +40,17 @@ from hid_report import HidReportBuilder, pynput_key_to_scancode
 from ble_hid_service import BleHidService
 
 # ---- Configuration ----
-PID_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".laptopkey.pid"))
-STOP_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".laptopkey.stop"))
-LOG_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "laptopkey.log"))
+PID_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".airkeys.pid"))
+LEGACY_PID_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".laptopkey.pid"))
+STOP_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".airkeys.stop"))
+LEGACY_STOP_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".laptopkey.stop"))
+LOG_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "airkeys.log"))
 
 # ---- Logging ----
 file_handler = logging.FileHandler(LOG_FILE, mode="a", encoding="utf-8")
 file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
 
-log = logging.getLogger("laptopkey")
+log = logging.getLogger("airkeys")
 log.setLevel(logging.INFO)
 log.addHandler(file_handler)
 
@@ -134,26 +136,28 @@ def _on_key_release(key):
 
 def _write_pid():
     """Write current process PID to file for CLI management."""
-    try:
-        with open(PID_FILE, "w", encoding="utf-8") as f:
-            f.write(str(os.getpid()))
-    except Exception as e:
-        log.warning(f"Could not write PID file: {e}")
+    pid_str = str(os.getpid())
+    for path in (PID_FILE, LEGACY_PID_FILE):
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(pid_str)
+        except Exception as e:
+            log.warning(f"Could not write PID file ({path}): {e}")
 
 
 def _remove_pid():
-    """Remove PID file on clean exit."""
-    try:
-        if os.path.exists(PID_FILE):
-            os.remove(PID_FILE)
-    except Exception:
-        pass
+    """Remove PID files on clean exit."""
+    for path in (PID_FILE, LEGACY_PID_FILE):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
 
 
 async def _main():
     global _ble_service, _loop
     _loop = asyncio.get_running_loop()
-    _write_pid()
 
     # Callback when phone connects/subscribes
     def on_subscriber_change(has_sub: bool):
@@ -168,18 +172,21 @@ async def _main():
     except Exception as e:
         log.error(f"Failed to start BLE HID service: {e}")
         _remove_pid()
-        sys.exit(1)
+        return 1
+
+    # Do not claim the service is running until Bluetooth advertising is ready.
+    _write_pid()
 
     if sys.stdout is not None:
         try:
             print()
             print("=" * 64)
-            print("   LaptopKey — BLE HID Keyboard Active")
+            print("   AirKeys — BLE HID Keyboard Active")
             print("=" * 64)
-            print("   Status:       🟢 ADVERTISING (Waiting for Phone)")
-            print("   Pairing:      Open phone Bluetooth -> Pair 'LaptopKey'")
+            print("   Status:        🟢 ADVERTISING (Waiting for Phone)")
+            print("   Pairing:       Open phone Bluetooth -> Pair 'AirKeys' or PC name")
             print("   On/Off Switch: Press [F12] anytime to MUTE / UNMUTE forwarding")
-            print("   Exit Switch:  Press [Scroll Lock] or Ctrl+C to stop")
+            print("   Exit Switch:   Press [Scroll Lock] or Ctrl+C to stop")
             print("=" * 64)
             print()
         except Exception:
@@ -202,7 +209,7 @@ async def _main():
 
     try:
         while not _exit_event.is_set():
-            if os.path.exists(STOP_FILE):
+            if os.path.exists(STOP_FILE) or os.path.exists(LEGACY_STOP_FILE):
                 log.info("Stop sentinel detected from CLI — stopping service.")
                 break
             await asyncio.sleep(0.2)
@@ -217,17 +224,18 @@ async def _main():
             except Exception as e:
                 log.warning(f"Error during BLE shutdown: {e}")
         _remove_pid()
-        if os.path.exists(STOP_FILE):
-            try:
-                os.remove(STOP_FILE)
-            except Exception:
-                pass
-        log.info("LaptopKey stopped successfully.")
+        for s_path in (STOP_FILE, LEGACY_STOP_FILE):
+            if os.path.exists(s_path):
+                try:
+                    os.remove(s_path)
+                except Exception:
+                    pass
+        log.info("AirKeys stopped successfully.")
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(_main())
+        sys.exit(asyncio.run(_main()) or 0)
     except KeyboardInterrupt:
         _remove_pid()
         print("\nExiting...")

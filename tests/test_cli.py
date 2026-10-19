@@ -25,6 +25,27 @@ class TestCliHelpers(unittest.TestCase):
         with patch("os.path.exists", return_value=False):
             self.assertIsNone(cli.get_current_pid())
 
+    def test_get_current_pid_airkeys(self):
+        """Should detect running PID from .airkeys.pid."""
+        current_pid = os.getpid()
+        with patch("os.path.exists", side_effect=lambda p: p == cli.PID_FILE), \
+             patch("builtins.open", unittest.mock.mock_open(read_data=str(current_pid))):
+            self.assertEqual(cli.get_current_pid(), current_pid)
+
+    def test_get_current_pid_legacy_fallback(self):
+        """Should detect running PID from .laptopkey.pid if primary not found."""
+        current_pid = os.getpid()
+        with patch("os.path.exists", side_effect=lambda p: p == cli.LEGACY_PID_FILE), \
+             patch("builtins.open", unittest.mock.mock_open(read_data=str(current_pid))):
+            self.assertEqual(cli.get_current_pid(), current_pid)
+
+    def test_cmd_on_stops_before_launch_when_environment_is_invalid(self):
+        """A missing dependency should be reported before a background process starts."""
+        with patch("cli.environment_problems", return_value=["Missing dependency: pynput."]), \
+             patch("cli.subprocess.Popen") as popen:
+            self.assertEqual(cli.cmd_on(), 2)
+        popen.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

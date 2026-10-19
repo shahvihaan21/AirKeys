@@ -86,6 +86,12 @@ Support for iOS, smart TVs, PCs, and other BLE HID-compatible devices may vary. 
 
 Clone the repository, or download and extract its source code. Open a terminal in the project directory.
 
+### Recommended: one-step setup
+
+Double-click `setup.bat` (or run it from Command Prompt). It creates a project-local `.venv`, installs the required packages into that environment, and checks whether the Bluetooth adapter can act as a BLE peripheral. The shortcut scripts automatically use this environment afterwards.
+
+If the final check reports that the BLE peripheral role is unsupported, this is a hardware/driver limitation rather than an installation failure. AirKeys cannot make that adapter advertise as a HID keyboard; update the Bluetooth driver or use an adapter that supports BLE peripheral mode.
+
 ### 2. Create and activate a virtual environment (recommended)
 
 ```powershell
@@ -109,6 +115,8 @@ python cli.py check
 ```
 
 Run this check before troubleshooting pairing. If the adapter or Windows environment does not support the required BLE peripheral behavior, the project may not be able to operate on that machine without a different supported implementation or hardware.
+
+`check` must finish with both **BLE Peripheral Role: Supported** and **GattServiceProvider HOGP: Supported**. Installing Python packages cannot compensate for either result being unsupported.
 
 ---
 

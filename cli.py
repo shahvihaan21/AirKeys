@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-cli.py — LaptopKey Master CLI & On/Off Switch
+cli.py — AirKeys Master CLI & On/Off Switch
 
 Commands:
-  python cli.py on          Turn ON LaptopKey in background
-  python cli.py off         Turn OFF LaptopKey cleanly
+  python cli.py on          Turn ON AirKeys in background
+  python cli.py off         Turn OFF AirKeys cleanly
   python cli.py switch      Toggle ON/OFF switch
   python cli.py status      Show current status and connection
   python cli.py logs        Show recent log output
@@ -15,7 +15,9 @@ import argparse
 import asyncio
 import ctypes
 from ctypes import wintypes
+import importlib.util
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -31,9 +33,41 @@ if sys.platform == "win32":
 # Directory and file paths
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 MAIN_PY = os.path.join(ROOT_DIR, "src", "main.py")
-PID_FILE = os.path.join(ROOT_DIR, ".laptopkey.pid")
-STOP_FILE = os.path.join(ROOT_DIR, ".laptopkey.stop")
-LOG_FILE = os.path.join(ROOT_DIR, "laptopkey.log")
+PID_FILE = os.path.join(ROOT_DIR, ".airkeys.pid")
+LEGACY_PID_FILE = os.path.join(ROOT_DIR, ".laptopkey.pid")
+STOP_FILE = os.path.join(ROOT_DIR, ".airkeys.stop")
+LEGACY_STOP_FILE = os.path.join(ROOT_DIR, ".laptopkey.stop")
+LOG_FILE = os.path.join(ROOT_DIR, "airkeys.log")
+LEGACY_LOG_FILE = os.path.join(ROOT_DIR, "laptopkey.log")
+
+
+def environment_problems() -> list[str]:
+    """Return actionable prerequisites that prevent AirKeys from starting."""
+    problems = []
+    if sys.platform != "win32":
+        problems.append("AirKeys requires Windows 10/11; this operating system is unsupported.")
+    if sys.version_info < (3, 10):
+        problems.append(f"Python 3.10 or newer is required (found {platform.python_version()}).")
+
+    required_modules = {
+        "pynput": "pynput",
+        "winrt.windows.devices.bluetooth": "winrt-Windows.Devices.Bluetooth",
+        "winrt.windows.devices.bluetooth.genericattributeprofile": (
+            "winrt-Windows.Devices.Bluetooth.GenericAttributeProfile"
+        ),
+        "winrt.windows.storage.streams": "winrt-Windows.Storage.Streams",
+    }
+    for module, package in required_modules.items():
+        if importlib.util.find_spec(module) is None:
+            problems.append(f"Missing dependency: {package}. Run setup.bat or pip install -r requirements.txt.")
+    return problems
+
+
+def print_environment_problems(problems: list[str]) -> None:
+    print("\n  AirKeys cannot start until these setup issues are fixed:")
+    for problem in problems:
+        print(f"  - {problem}")
+    print("  Run setup.bat from the project folder, then run: python cli.py check\n")
 
 
 # =====================================================================
@@ -58,26 +92,27 @@ def is_pid_running(pid: int) -> bool:
 
 
 def get_current_pid() -> int | None:
-    """Read PID from PID_FILE if it exists and process is alive."""
-    if not os.path.exists(PID_FILE):
-        return None
-    try:
-        with open(PID_FILE, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-            if not content:
-                return None
-            pid = int(content)
-            if is_pid_running(pid):
-                return pid
-            else:
-                # Stale PID file
-                try:
-                    os.remove(PID_FILE)
-                except Exception:
-                    pass
-                return None
-    except Exception:
-        return None
+    """Read PID from PID_FILE (or fallback LEGACY_PID_FILE) if process is alive."""
+    for path in (PID_FILE, LEGACY_PID_FILE):
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if not content:
+                    continue
+                pid = int(content)
+                if is_pid_running(pid):
+                    return pid
+                else:
+                    # Stale PID file
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    return None
 
 
 def terminate_pid(pid: int):
@@ -94,29 +129,35 @@ def terminate_pid(pid: int):
 # =====================================================================
 
 def cmd_on(args=None):
-    """Turn ON LaptopKey."""
+    """Turn ON AirKeys."""
+    problems = environment_problems()
+    if problems:
+        print_environment_problems(problems)
+        return 2
+
     pid = get_current_pid()
     if pid is not None:
         print()
-        print("  🟢 LaptopKey is ALREADY RUNNING!")
+        print("  🟢 AirKeys is ALREADY RUNNING!")
         print(f"     PID:      {pid}")
-        print("     Status:   Broadcasting BLE Keyboard (LaptopKey)")
+        print("     Status:   Broadcasting BLE Keyboard (AirKeys)")
         print("     To turn OFF: python cli.py off   (or run scripts/switch.bat)")
         print()
         return 0
 
     # Clean up any leftover stop files
-    if os.path.exists(STOP_FILE):
-        try:
-            os.remove(STOP_FILE)
-        except Exception:
-            pass
+    for s_path in (STOP_FILE, LEGACY_STOP_FILE):
+        if os.path.exists(s_path):
+            try:
+                os.remove(s_path)
+            except Exception:
+                pass
 
     foreground = getattr(args, "foreground", False)
 
     if foreground:
         print()
-        print("  🟢 Starting LaptopKey in FOREGROUND mode...")
+        print("  🟢 Starting AirKeys in FOREGROUND mode...")
         print("     (Press Ctrl+C or Scroll Lock to exit)")
         print()
         try:
@@ -136,11 +177,11 @@ def cmd_on(args=None):
     CREATE_NO_WINDOW = 0x08000000
 
     print()
-    print("  ⏳ Starting LaptopKey service in background...")
+    print("  ⏳ Starting AirKeys service in background...")
     try:
         log_f = open(LOG_FILE, "a", encoding="utf-8", errors="replace")
         proc = subprocess.Popen(
-            [sys.executable, MAIN_PY],
+            [executable, MAIN_PY],
             cwd=ROOT_DIR,
             creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
             close_fds=True,
@@ -148,6 +189,7 @@ def cmd_on(args=None):
             stderr=log_f,
             stdin=subprocess.DEVNULL,
         )
+        log_f.close()
     except Exception as e:
         print(f"  ❌ Error starting process: {e}")
         return 1
@@ -161,12 +203,13 @@ def cmd_on(args=None):
             break
 
     if confirmed_pid is not None:
+        machine_name = platform.node()
         print("  ╔════════════════════════════════════════════════════════════════╗")
-        print("  ║                   🟢 LAPTOPKEY IS NOW ON                       ║")
+        print("  ║                   🟢 AIRKEYS IS NOW ON                         ║")
         print("  ╠════════════════════════════════════════════════════════════════╣")
         print(f"  ║  Process PID:   {confirmed_pid:<46} ║")
-        print("  ║  BLE Broadcast: LaptopKey (Ready to Pair on Phone)            ║")
-        print("  ║  Pairing:       Settings -> Bluetooth -> Pair 'LaptopKey'      ║")
+        print(f"  ║  BLE Broadcast: AirKeys / {machine_name:<34} ║")
+        print("  ║  Pairing:       Settings -> Bluetooth -> Pair 'AirKeys' / PC   ║")
         print("  ║  Mute Switch:   Press [F12] anytime to pause/resume forwarding ║")
         print("  ║  Turn OFF:      python cli.py off   (or run scripts/switch.bat)║")
         print("  ╚════════════════════════════════════════════════════════════════╝")
@@ -175,7 +218,7 @@ def cmd_on(args=None):
     else:
         # Check if proc exited immediately
         if proc.poll() is not None:
-            print(f"  ❌ LaptopKey failed to start. (Exit code: {proc.returncode})")
+            print(f"  ❌ AirKeys failed to start. (Exit code: {proc.returncode})")
             print(f"     Check logs with: python cli.py logs")
         else:
             print(f"  ⚠️ Process started (PID: {proc.pid}), waiting for initialization...")
@@ -184,23 +227,24 @@ def cmd_on(args=None):
 
 
 def cmd_off(args=None):
-    """Turn OFF LaptopKey cleanly."""
+    """Turn OFF AirKeys cleanly."""
     pid = get_current_pid()
     if pid is None:
         print()
-        print("  🔴 LaptopKey is ALREADY OFF (Not running).")
+        print("  🔴 AirKeys is ALREADY OFF (Not running).")
         print()
         return 0
 
     print()
-    print(f"  ⏳ Sending graceful stop signal to LaptopKey (PID: {pid})...")
+    print(f"  ⏳ Sending graceful stop signal to AirKeys (PID: {pid})...")
     
-    # Write stop sentinel file
-    try:
-        with open(STOP_FILE, "w", encoding="utf-8") as f:
-            f.write("stop")
-    except Exception as e:
-        print(f"  ⚠️ Could not write stop sentinel: {e}")
+    # Write stop sentinel files
+    for s_path in (STOP_FILE, LEGACY_STOP_FILE):
+        try:
+            with open(s_path, "w", encoding="utf-8") as f:
+                f.write("stop")
+        except Exception as e:
+            print(f"  ⚠️ Could not write stop sentinel ({s_path}): {e}")
 
     # Wait up to 3.5 seconds for graceful shutdown
     stopped = False
@@ -216,7 +260,7 @@ def cmd_off(args=None):
         time.sleep(0.3)
 
     # Clean up PID and STOP files
-    for path in (PID_FILE, STOP_FILE):
+    for path in (PID_FILE, LEGACY_PID_FILE, STOP_FILE, LEGACY_STOP_FILE):
         if os.path.exists(path):
             try:
                 os.remove(path)
@@ -224,7 +268,7 @@ def cmd_off(args=None):
                 pass
 
     print("  ╔════════════════════════════════════════════════════════════════╗")
-    print("  ║                   🔴 LAPTOPKEY IS NOW OFF                      ║")
+    print("  ║                   🔴 AIRKEYS IS NOW OFF                        ║")
     print("  ╠════════════════════════════════════════════════════════════════╣")
     print("  ║  Status:         STOPPED & DISCONNECTED                        ║")
     print("  ║  BLE Broadcast:  Disabled                                      ║")
@@ -244,7 +288,7 @@ def cmd_switch(args=None):
     pid = get_current_pid()
     print()
     print("  ================================================================")
-    print("                     [ LAPTOPKEY POWER SWITCH ]                  ")
+    print("                      [ AIRKEYS POWER SWITCH ]                   ")
     print("  ================================================================")
     if pid is not None:
         print(f"  Current State:  🟢 ON  (PID: {pid})")
@@ -269,7 +313,7 @@ def _interactive_switch():
             os.system("cls" if os.name == "nt" else "clear")
             print()
             print("  ╔══════════════════════════════════════════════════════════════╗")
-            print("  ║               LAPTOPKEY INTERACTIVE SWITCH                   ║")
+            print("  ║                AIRKEYS INTERACTIVE SWITCH                    ║")
             print("  ╠══════════════════════════════════════════════════════════════╣")
             print(f"  ║   SWITCH:   {state_str}           STATUS: {status_text:<15} ║")
             print("  ╠══════════════════════════════════════════════════════════════╣")
@@ -307,24 +351,26 @@ def _interactive_switch():
 def cmd_status(args=None):
     """Display current system and service status."""
     pid = get_current_pid()
+    machine_name = platform.node()
     print()
     print("  ================================================================")
-    print("                       LAPTOPKEY STATUS                           ")
+    print("                        AIRKEYS STATUS                            ")
     print("  ================================================================")
     if pid is not None:
         print(f"  Service State:   🟢 RUNNING (PID: {pid})")
         print("  Bluetooth Role:  BLE Peripheral Keyboard (HOGP)")
-        print("  Advertised Name: LaptopKey")
+        print(f"  Advertised Name: AirKeys / {machine_name}")
         print("  Typing Control:  [F12] toggles typing forwarding to phone")
         print("  Stop Switch:     python cli.py off  (or run scripts/switch.bat)")
     else:
         print("  Service State:   🔴 STOPPED (Not running)")
         print("  Start Switch:    python cli.py on   (or run scripts/switch.bat)")
 
-    # Log tail
-    if os.path.exists(LOG_FILE):
+    # Log tail (check current log file, or fallback to legacy)
+    active_log = LOG_FILE if os.path.exists(LOG_FILE) else (LEGACY_LOG_FILE if os.path.exists(LEGACY_LOG_FILE) else None)
+    if active_log:
         try:
-            with open(LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+            with open(active_log, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
                 print("\n  Recent Logs (Last 5 lines):")
                 print("  " + "-" * 60)
@@ -340,15 +386,16 @@ def cmd_status(args=None):
 def cmd_logs(args=None):
     """View recent logs."""
     lines_count = getattr(args, "lines", 30)
-    if not os.path.exists(LOG_FILE):
-        print("\n  No log file found yet (laptopkey.log).\n")
+    active_log = LOG_FILE if os.path.exists(LOG_FILE) else (LEGACY_LOG_FILE if os.path.exists(LEGACY_LOG_FILE) else None)
+    if not active_log:
+        print("\n  No log file found yet (airkeys.log).\n")
         return 0
 
     print()
-    print(f"  Recent Logs ({LOG_FILE}) — Last {lines_count} lines:")
+    print(f"  Recent Logs ({active_log}) — Last {lines_count} lines:")
     print("  " + "=" * 64)
     try:
-        with open(LOG_FILE, "r", encoding="utf-8", errors="replace") as f:
+        with open(active_log, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
             for line in lines[-lines_count:]:
                 print("  " + line.rstrip())
@@ -364,6 +411,11 @@ def cmd_check(args=None):
     print()
     print("  Checking Bluetooth Adapter & BLE Peripheral Capabilities...")
     print("  " + "-" * 60)
+
+    problems = environment_problems()
+    if problems:
+        print_environment_problems(problems)
+        return 2
 
     async def _probe():
         try:
@@ -391,7 +443,7 @@ def cmd_check(args=None):
             
             print("  " + "-" * 60)
             if peri and gatt_ok:
-                print("  🎉 Your laptop fully supports LaptopKey BLE HID!")
+                print("  🎉 Your laptop fully supports AirKeys BLE HID!")
             else:
                 print("  ⚠️ Hardware or driver limitations detected.")
             print()
@@ -400,13 +452,12 @@ def cmd_check(args=None):
             print(f"  ❌ Check failed with error: {e}\n")
             return False
 
-    asyncio.run(_probe())
-    return 0
+    return 0 if asyncio.run(_probe()) else 1
 
 
 def cmd_restart(args=None):
-    """Restart LaptopKey."""
-    print("\n  Restarting LaptopKey...")
+    """Restart AirKeys."""
+    print("\n  Restarting AirKeys...")
     cmd_off(args)
     time.sleep(1)
     return cmd_on(args)
@@ -418,7 +469,7 @@ def cmd_restart(args=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="LaptopKey — Turn your laptop keyboard into a wireless Bluetooth keyboard for mobile devices.",
+        description="AirKeys — Turn your laptop keyboard into a wireless Bluetooth keyboard for mobile devices.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -434,11 +485,11 @@ Examples:
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
 
     # on
-    parser_on = subparsers.add_parser("on", aliases=["start"], help="Turn ON LaptopKey")
+    parser_on = subparsers.add_parser("on", aliases=["start"], help="Turn ON AirKeys")
     parser_on.add_argument("-f", "--foreground", action="store_true", help="Run attached in the foreground")
 
     # off
-    subparsers.add_parser("off", aliases=["stop"], help="Turn OFF LaptopKey")
+    subparsers.add_parser("off", aliases=["stop"], help="Turn OFF AirKeys")
 
     # switch / toggle
     parser_switch = subparsers.add_parser("switch", aliases=["toggle"], help="Toggle ON/OFF switch")
@@ -455,7 +506,7 @@ Examples:
     subparsers.add_parser("check", help="Check Bluetooth hardware compatibility")
 
     # restart
-    subparsers.add_parser("restart", help="Restart LaptopKey")
+    subparsers.add_parser("restart", help="Restart AirKeys")
 
     args = parser.parse_args()
 
@@ -480,7 +531,7 @@ Examples:
         state = "🟢 ON (Running)" if pid is not None else "🔴 OFF (Stopped)"
         print()
         print("  ================================================================")
-        print("                        LAPTOPKEY CLI                           ")
+        print("                         AIRKEYS CLI                            ")
         print("  ================================================================")
         print(f"  Current Switch State: {state}")
         print()
