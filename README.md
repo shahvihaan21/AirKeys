@@ -35,6 +35,21 @@ The intended experience is simple: enable AirKeys, pair the phone with the adver
 
 No verified demo recording is currently included. This avoids a broken image and does not imply device compatibility that has not been independently reproduced.
 
+The evidence standard and a capture checklist are in [docs/demo.md](docs/demo.md). The absence of media is a known documentation gap, not evidence that the prototype works on a particular device.
+
+## Documentation
+
+| Document | Purpose |
+|---|---|
+| [Architecture and data flow](docs/architecture.md) | Component diagram, startup/shutdown sequence, and GATT surface. |
+| [Implementation status](docs/implementation-status.md) | What is implemented, unverified, unsupported, and planned. |
+| [Components and key reports](docs/key-reports.md) | Module responsibilities, report format, mappings, and hotkeys. |
+| [Verification](docs/verification.md) | Automated-test scope and real-device test protocol. |
+| [Compatibility and troubleshooting](docs/compatibility.md) | Support matrix and symptom-driven diagnostics. |
+| [Security and lifecycle](docs/security-lifecycle.md) | Input-capture boundary, GATT protection, release behavior, and failure limits. |
+| [Demo evidence](docs/demo.md) | Current media status and reproducible recording requirements. |
+| [Contributing](CONTRIBUTING.md) | Contribution and reporting expectations. |
+
 ---
 
 ## ⚙️ How It Works
@@ -277,6 +292,13 @@ The development notes for the original AirKeys experiment record an initial prot
 - 🧪 Expand automated tests and document hardware-specific limitations.
 
 These are potential improvements, not features guaranteed to be available in the current prototype.
+
+### Documentation roadmap
+
+1. Publish a redacted, continuous real-device demonstration with the hardware and software details recorded in `docs/demo.md`.
+2. Convert successful and failed physical-device results into dated entries in the compatibility matrix.
+3. Add hardware-in-the-loop verification for pairing, subscription, notification delivery, reconnect, and stuck-key recovery.
+4. Expand supported key behavior only alongside report-level and device-level tests.
 
 ---
 
