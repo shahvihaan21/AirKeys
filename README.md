@@ -96,27 +96,6 @@ flowchart LR
 | `src/ble_hid_service.py` | Creates local GATT services, advertises them, tracks subscribers, and serializes notifications. |
 | `tests/` | Unit tests and mocked BLE lifecycle tests; no physical-device tests. |
 
-### Data flow and lifecycle
-
-```mermaid
-sequenceDiagram
-  participant C as cli.py
-  participant M as main.py
-  participant B as BleHidService
-  participant W as Windows BLE stack
-  participant H as HID host
-  C->>M: start process
-  M->>B: start()
-  B->>W: verify adapter; create and advertise GATT services
-  H->>W: pair and subscribe to Input Report
-  W-->>B: subscriber change
-  M->>B: send 8-byte HID notifications
-  C->>M: stop sentinel, or user presses Scroll Lock
-  M->>B: release all keys; stop advertising
-```
-
-The required HID service (`0x1812`) exposes HID Information, Report Map, Control Point, Protocol Mode, and a notifying Input Report (`0x2A4D`) with an Input Report Reference. The application also tries to expose an optional Battery service (`0x180F`) with a static 100% value. Battery-service failure is non-fatal; HID-service creation failure prevents startup.
-
 ## Keyboard behavior
 
 AirKeys sends one eight-byte report with no report ID:
@@ -187,15 +166,7 @@ For a real-device result, record the Windows build, Python version, Bluetooth ad
 
 No demonstration video or screenshot is currently committed. A valid future demonstration should continuously show the capability check, pairing, typing in a visible text field, F12 mute/unmute, and clean shutdown, with sensitive data removed.
 
-## Development and contributions
 
-Before a substantial change, open an issue with the Windows build, Python version, Bluetooth adapter/driver, receiving-device model/OS, capability-check output, and sanitized logs. Keep claims aligned with observed evidence, add focused tests, and run the full test suite. Do not commit credentials, pairing identifiers, personal input, or unredacted logs.
-
-### Roadmap
-
-1. Publish repeatable, redacted real-device evidence and record both successful and failed compatibility results.
-2. Add hardware-in-the-loop tests for pairing, notification delivery, reconnect, and stuck-key recovery.
-3. Improve reconnection, host-state handling, and layout/special-key support only with corresponding tests.
 
 ## Project layout
 
