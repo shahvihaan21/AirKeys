@@ -1,141 +1,51 @@
-# ⌨️ AirKeys — Turn Your Laptop into a Bluetooth Keyboard
+# AirKeys
 
-<p align="center">
-  <strong>Your laptop's keyboard. Your phone's screen. No companion app required.</strong>
-</p>
+AirKeys is an experimental Windows application that presents a laptop as a Bluetooth Low Energy (BLE) keyboard for a compatible receiving device. It captures supported laptop key events, converts them to HID keyboard reports, and publishes them through a local HID-over-GATT (HOGP) service.
 
-AirKeys is a Windows-based experimental project that explores turning a laptop into a wireless Bluetooth keyboard for an Android phone or another compatible device. It uses the Bluetooth Human Interface Device (HID) concept so a compatible phone can recognize the laptop as a standard keyboard.
+> **Prototype status:** The software path is implemented and unit tested, but Bluetooth discovery, pairing, subscription, input delivery, and reconnection remain dependent on the specific Windows adapter, driver, and receiving device. There is no current demonstration recording or compatibility certification in this repository.
 
-The project combines a practical everyday idea with hands-on work in Bluetooth Low Energy (BLE), HID reports, keyboard event handling, Windows integration, and debugging.
+## What it does
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Platform-Windows-blue" alt="Platform: Windows">
-  <img src="https://img.shields.io/badge/Language-Python-3776AB" alt="Language: Python">
-  <img src="https://img.shields.io/badge/Connectivity-Bluetooth%20LE-5865F2" alt="Connectivity: Bluetooth LE">
-  <img src="https://img.shields.io/badge/Status-Experimental%20Prototype-orange" alt="Status: Experimental prototype">
-</p>
+- Runs a BLE HID-over-GATT keyboard service on Windows.
+- Captures supported keyboard events using `pynput` and sends standard eight-byte HID reports to subscribed hosts.
+- Provides command-line and batch-script controls to start, stop, inspect, and diagnose the service.
+- Requests authenticated and encrypted access for HID GATT characteristics.
 
----
+## What it does not do
 
-## ✨ Why AirKeys?
+- It does not implement Bluetooth Classic HID.
+- It does not guarantee compatibility with Android, iOS, desktops, TVs, or every Bluetooth adapter.
+- It does not handle arbitrary Unicode text, consumer/media keys, mouse input, keyboard LEDs, or host output reports.
+- It does not maintain its own bonded-device allowlist or reconnection policy; those responsibilities belong to Windows and the receiving host.
 
-Typing long messages on a phone can be awkward when a physical keyboard is already available. AirKeys explores a way to use that keyboard directly, without installing a dedicated receiver app on the mobile device.
+## Requirements
 
-- ⌨️ **More comfortable typing:** Use your laptop's physical keyboard for mobile text input.
-- 📱 **No phone-side companion app:** The intended workflow uses the phone's built-in support for compatible Bluetooth keyboards.
-- 📡 **Direct wireless connection:** Designed around Bluetooth rather than Wi-Fi or cloud services.
-- 🧪 **Built to learn:** A practical experiment in HID protocols, BLE communication, and Windows system integration.
-- 🎛️ **Convenient controls:** Includes command-line controls and Windows shortcut scripts for managing the service.
+- Windows 10 (version 1703 or later) or Windows 11
+- Python 3.10 or later
+- A Bluetooth adapter and driver that support the BLE peripheral role
+- A receiving device that supports BLE HID keyboards
 
-> **Compatibility note:** This approach depends on the Bluetooth adapter, Windows drivers and APIs, and the receiving device's HID support. Not every Windows laptop supports acting as a BLE keyboard peripheral out of the box.
-
-## 🎬 See It in Action
-
-The intended experience is simple: enable AirKeys, pair the phone with the advertised Bluetooth keyboard, and type on the laptop.
-
-No verified demo recording is currently included. This avoids a broken image and does not imply device compatibility that has not been independently reproduced.
-
-The evidence standard and a capture checklist are in [docs/demo.md](docs/demo.md). The absence of media is a known documentation gap, not evidence that the prototype works on a particular device.
-
-## Documentation
-
-| Document | Purpose |
-|---|---|
-| [Architecture and data flow](docs/architecture.md) | Component diagram, startup/shutdown sequence, and GATT surface. |
-| [Implementation status](docs/implementation-status.md) | What is implemented, unverified, unsupported, and planned. |
-| [Components and key reports](docs/key-reports.md) | Module responsibilities, report format, mappings, and hotkeys. |
-| [Verification](docs/verification.md) | Automated-test scope and real-device test protocol. |
-| [Compatibility and troubleshooting](docs/compatibility.md) | Support matrix and symptom-driven diagnostics. |
-| [Security and lifecycle](docs/security-lifecycle.md) | Input-capture boundary, GATT protection, release behavior, and failure limits. |
-| [Demo evidence](docs/demo.md) | Current media status and reproducible recording requirements. |
-| [Contributing](CONTRIBUTING.md) | Contribution and reporting expectations. |
-
----
-
-## ⚙️ How It Works
-
-AirKeys explores Bluetooth HID emulation, with BLE HID over GATT (HOGP) as its intended peripheral approach.
-
-At a high level, the program:
-
-1. 🖥️ Runs on the Windows laptop.
-2. 📡 Advertises a compatible Bluetooth HID keyboard service, where supported.
-3. 📱 Allows a compatible phone or other host to discover and pair with the keyboard.
-4. ⌨️ Captures keyboard input and represents key presses using standard HID keyboard reports.
-5. 🔁 Provides runtime controls to pause forwarding or shut down cleanly.
-
-Bluetooth discovery and pairing alone are not enough: the laptop must expose the right peripheral role and a compatible HID service, and the phone must accept the resulting keyboard input.
-
-### 🧩 Technical Components
-
-| Component | Role |
-|---|---|
-| Bluetooth HID / HOGP | Describes how a compatible host recognizes keyboard input over BLE. |
-| BLE service | Handles the Bluetooth HID-over-GATT service through supported Windows APIs. |
-| HID reports | Encodes key presses, releases, and modifier keys into keyboard reports. |
-| Keyboard event handling | Captures local keyboard events for forwarding. |
-| Runtime controls | Manages activation, deactivation, status, and clean shutdown. |
-| Diagnostics and tests | Helps check adapter support and validate key-report and CLI behavior. |
-
----
-
-## 🧰 Requirements
-
-- **Operating system:** Windows 10 (version 1703 or later) or Windows 11, 64-bit
-- **Python:** 3.10 or newer
-- **Bluetooth adapter:** Must support the required BLE peripheral role and work with the implementation
-- **Receiving device:** Android 5.0+ or another device that supports compatible Bluetooth HID keyboards
-- **Dependencies:** Installed from `requirements.txt`
-
-Support for iOS, smart TVs, PCs, and other BLE HID-compatible devices may vary. The requirements above do not guarantee compatibility with every adapter or device.
-
-## 🚀 Installation
-
-### 1. Get the project
-
-Clone the repository, or download and extract its source code. Open a terminal in the project directory.
-
-### Recommended: one-step setup
-
-Double-click `setup.bat` (or run it from Command Prompt). It creates a project-local `.venv`, installs the required packages into that environment, and checks whether the Bluetooth adapter can act as a BLE peripheral. The shortcut scripts automatically use this environment afterwards.
-
-If the final check reports that the BLE peripheral role is unsupported, this is a hardware/driver limitation rather than an installation failure. AirKeys cannot make that adapter advertise as a HID keyboard; update the Bluetooth driver or use an adapter that supports BLE peripheral mode.
-
-### 2. Create and activate a virtual environment (recommended)
-
-```powershell
-py -3.10 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-
-If PowerShell blocks activation due to its execution policy, use an approved activation method for your environment or run the commands through Command Prompt instead.
-
-### 3. Install dependencies
-
-```powershell
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-### 4. Check Bluetooth capability
+Run the capability check before attempting to pair. Both the peripheral-role and GATT HID-service checks must succeed:
 
 ```powershell
 python cli.py check
 ```
 
-Run this check before troubleshooting pairing. If the adapter or Windows environment does not support the required BLE peripheral behavior, the project may not be able to operate on that machine without a different supported implementation or hardware.
+Installing dependencies cannot add BLE peripheral support to an unsupported adapter or driver.
 
-`check` must finish with both **BLE Peripheral Role: Supported** and **GattServiceProvider HOGP: Supported**. Installing Python packages cannot compensate for either result being unsupported.
+## Install
 
----
+From the repository root, either run `setup.bat` or create a virtual environment and install the dependencies manually:
 
-## ⚡ Quick Start: Control AirKeys
+```powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+python cli.py check
+```
 
-AirKeys provides command-line controls and Windows shortcut scripts.
-
-### Common commands
-
-Run these commands from the project root:
+## Use
 
 ```powershell
 python cli.py on
@@ -143,189 +53,162 @@ python cli.py status
 python cli.py off
 ```
 
-| Command | What it does |
+| Command | Purpose |
 |---|---|
-| `python cli.py on` | Starts AirKeys in the background. |
-| `python cli.py off` | Requests a clean shutdown. |
-| `python cli.py switch` | Toggles AirKeys on or off. |
-| `python cli.py status` | Checks service status and active process information. |
-| `python cli.py check` | Checks Bluetooth BLE support. |
-| `python cli.py logs` | Displays recent diagnostic logs. |
+| `python cli.py on` | Starts AirKeys in the background. Add `--foreground` to run it in the current console. |
+| `python cli.py off` | Requests a graceful shutdown. |
+| `python cli.py switch` | Toggles the background service. |
+| `python cli.py status` | Shows process and service status. |
+| `python cli.py check` | Checks dependencies, adapter capability, and local HID service creation. |
+| `python cli.py logs` | Prints recent diagnostic logs. |
 | `python cli.py restart` | Restarts the service. |
 
-### 🖱️ One-click Windows shortcuts
+Windows shortcuts for the common actions are available in `scripts/`.
 
-The `scripts/` folder includes shortcuts for common actions:
+### Pair a receiving device
 
-- `scripts/on.bat` — turn AirKeys on
-- `scripts/off.bat` — turn AirKeys off
-- `scripts/switch.bat` — toggle on/off
-- `scripts/status.bat` — check status
+1. Start AirKeys and confirm `python cli.py check` has passed on that machine.
+2. Open the receiving device's Bluetooth settings and scan for devices.
+3. Pair with the local service as it is presented by Windows. The display name is controlled by Windows and may not be `AirKeys`.
+4. Focus a text field on the receiving device and test input.
 
-Double-click the relevant `.bat` file to run its action. You can also use the command-line interface for the same controls.
+Pairing alone does not confirm that HID input is working. Use the real-device checks below before describing a device as compatible.
 
-### 🎛️ Interactive switch
+## Architecture
 
-To open the interactive console switch, run:
-
-```powershell
-python cli.py switch -i
+```mermaid
+flowchart LR
+  K[Physical laptop keyboard] --> P[pynput listener]
+  P --> M[pynput_key_to_scancode]
+  M --> R[HidReportBuilder]
+  R --> Q[main.py async send queue]
+  Q --> B[BleHidService]
+  B --> G[Windows WinRT GATT server]
+  G --> H[Paired host subscribed to Input Report]
+  H --> A[Host keyboard layout and focused app]
 ```
 
-The standalone helper is also available:
-
-```powershell
-python scripts/switch.py -i
-```
-
----
-
-## 📱 Pair Your Phone
-
-1. **Start AirKeys** using `python cli.py on` or `scripts/switch.bat`.
-2. On your phone, open **Settings → Bluetooth** (the exact menu name varies by device).
-3. Choose **Pair new device** or the equivalent discovery option.
-4. Select **AirKeys** or the Bluetooth name advertised by your Windows implementation.
-5. If Windows displays a pairing or connection prompt, review it and allow the connection when appropriate.
-6. Open a text field on the phone and try typing on the laptop keyboard.
-
-Once connected successfully, the phone should recognize the device as a physical keyboard. The advertised name may differ depending on the current configuration.
-
-**If it does not work:** run `python cli.py check`, verify that the adapter supports the required BLE peripheral role, confirm that AirKeys is running, and check the logs. A successful Bluetooth pairing does not necessarily mean HID input is being delivered correctly.
-
----
-
-## 🔒 Bluetooth security and limitations
-
-AirKeys configures the HID Information, Report Map, Control Point, Protocol Mode, Input Report, and Report Reference characteristics to require an authenticated, encrypted Bluetooth LE connection. Keyboard reports are sent only to subscribed clients; Windows is expected to reject access that cannot satisfy the protected GATT subscription. Confirm this on the target adapter and phone using the release checklist below.
-
-Windows' `GattServiceProvider` API does not expose a reliable application-level allowlist, bond store, peer identity, or per-notification authorization callback for local GATT services. AirKeys therefore relies on Windows Bluetooth pairing/authentication and characteristic protection; it cannot independently prove a specific bonded phone is the recipient. Do not use it for sensitive input until pairing and reconnection have been checked on the target adapter and phone.
-
-## 🎹 Runtime Controls
-
-While AirKeys is running, the implementation provides these controls:
-
-| Key / command | Action |
+| Component | Responsibility |
 |---|---|
-| `F12` | Toggles keyboard forwarding on or off without disconnecting Bluetooth. |
-| `Scroll Lock` | Initiates a clean exit, releases held keys, removes the keyboard hook, and stops BLE advertising. |
-| `python cli.py off` | Requests a graceful shutdown of the background service. |
+| `cli.py` | Checks prerequisites; starts, stops, monitors, and tails the service. |
+| `src/main.py` | Coordinates keyboard capture, forwarding state, report state, PID files, signals, and shutdown. |
+| `src/hid_report.py` | Defines HID usages, modifier bits, the report map, and the report builder. |
+| `src/ble_hid_service.py` | Creates local GATT services, advertises them, tracks subscribers, and serializes notifications. |
+| `tests/` | Unit tests and mocked BLE lifecycle tests; no physical-device tests. |
 
-These controls are implementation-specific and may depend on the active configuration and runtime environment.
+### Data flow and lifecycle
 
----
+```mermaid
+sequenceDiagram
+  participant C as cli.py
+  participant M as main.py
+  participant B as BleHidService
+  participant W as Windows BLE stack
+  participant H as HID host
+  C->>M: start process
+  M->>B: start()
+  B->>W: verify adapter; create and advertise GATT services
+  H->>W: pair and subscribe to Input Report
+  W-->>B: subscriber change
+  M->>B: send 8-byte HID notifications
+  C->>M: stop sentinel, or user presses Scroll Lock
+  M->>B: release all keys; stop advertising
+```
 
-## 🧪 Run the Tests
+The required HID service (`0x1812`) exposes HID Information, Report Map, Control Point, Protocol Mode, and a notifying Input Report (`0x2A4D`) with an Input Report Reference. The application also tries to expose an optional Battery service (`0x180F`) with a static 100% value. Battery-service failure is non-fatal; HID-service creation failure prevents startup.
 
-Run the automated test suite from the project root:
+## Keyboard behavior
+
+AirKeys sends one eight-byte report with no report ID:
+
+```text
+byte 0       modifier bitmap
+byte 1       reserved (0x00)
+bytes 2..7   up to six USB HID keyboard usages
+```
+
+Supported input includes ASCII letters, digits, US punctuation, shifted US punctuation, common editing/navigation keys, function keys, and Ctrl/Shift/Alt/GUI modifiers. HID represents physical key positions, so the receiving device's active keyboard layout determines the displayed character. Unsupported and non-ASCII characters are ignored.
+
+Physical modifiers remain active until their release event. Uppercase letters and shifted punctuation add a temporary Shift bit for the press report. The builder tracks at most six non-modifier keys; pressing a seventh removes the oldest tracked key.
+
+| Control | Behavior |
+|---|---|
+| `F12` | Toggles forwarding. Muting sends a release-all report first. |
+| `Scroll Lock` | Stops the listener and begins clean shutdown. |
+| `Ctrl+C` / `python cli.py off` | Requests clean shutdown. |
+
+AirKeys does not suppress normal laptop input; the local operating system may receive the same key events.
+
+## Security and reliability
+
+AirKeys captures global keyboard events while active. Use it only with a trusted paired device and stop it when it is not needed. HID characteristics request Windows authenticated encryption, and reports are notified only when an Input Report client is subscribed.
+
+Windows and the receiving host enforce pairing, encryption, and bond management. AirKeys has no application-level peer allowlist, bond store, peer-identity callback, or per-notification authorization step. Do not use this prototype for passwords, recovery phrases, payment information, or other sensitive text until you have validated its behavior on the exact devices involved.
+
+Notification sends are serialized. Failed sends and subscription loss clear AirKeys' in-memory pressed-key state. Normal shutdown attempts to send a release-all report, stop capture, stop advertising, and remove runtime state files. A crash, power loss, or forced termination can prevent the final release report; test for stuck keys after such events.
+
+## Compatibility and troubleshooting
+
+| Platform / requirement | Status |
+|---|---|
+| Windows 10/11 with Python 3.10+ | Required |
+| BLE peripheral role and local HID service creation | Required; verify with `python cli.py check` |
+| Android BLE HID host | Candidate; device-specific and not certified |
+| iOS/iPadOS or desktop host | Unverified |
+| Bluetooth Classic-only host | Unsupported |
+
+| Symptom | Recommended action |
+|---|---|
+| No adapter or peripheral-role support | Enable Bluetooth, update the adapter driver, or use an adapter supported by Windows for BLE peripheral mode. |
+| Service exits or is not discoverable | Run `python cli.py logs`, then resolve dependency or HID-service creation errors. |
+| Pairing succeeds but there is no input | Check logs for a subscriber change and run the key tests below. Pairing is not proof of input delivery. |
+| Unexpected characters | Test with a US-oriented keyboard layout on the receiving host; HID sends usages, not Unicode. |
+| A key appears stuck | Disconnect/reconnect, restart AirKeys, and record the held key and timing with sanitized logs. |
+| `off` forces termination | Check logs. The final release report may not have been sent. |
+
+## Verification
+
+Run the automated tests from the repository root:
 
 ```powershell
 python -m unittest discover tests
 ```
 
-The test suite includes checks for HID report encoding and modifier handling, as well as CLI state and process-management behavior.
+The tests cover HID report construction and mappings, CLI helper behavior, and a mocked BLE-service lifecycle. They do not exercise a real Windows radio, advertising, pairing, or host interoperability.
 
-Tests can help validate individual components, but they do not replace testing with the actual Bluetooth adapter and receiving device.
+For a real-device result, record the Windows build, Python version, Bluetooth adapter and driver, receiving device and OS, and `python cli.py check` output. Then verify:
 
-### Manual real-device release checklist
+1. Discovery and OS pairing.
+2. Lowercase/uppercase ASCII, digits, shifted punctuation, arrows, Backspace, Tab, and Enter.
+3. Ctrl, Alt, and Shift combinations.
+4. F12 mute/unmute and Scroll Lock shutdown.
+5. Disconnect while a key is held, reconnect, and confirm no key remains stuck.
+6. Stop, restart, reconnect, and retest input.
 
-- Confirm an unpaired phone cannot subscribe to or receive keyboard input; complete the OS pairing flow and confirm reports work only after pairing.
-- Type lowercase and uppercase letters, digits, `! @ # $ % ^ & * ( )`, punctuation, and Ctrl/Alt/Shift combinations in a phone text field.
-- Disconnect Bluetooth while holding a key, reconnect, and confirm no key remains logically held before typing again.
-- Stop and restart AirKeys, then confirm the phone can reconnect and typing resumes without reusing stale key state.
-- Repeat with the phone's intended keyboard layout. HID keyboard usages represent US physical key positions; the phone layout determines the displayed character.
+No demonstration video or screenshot is currently committed. A valid future demonstration should continuously show the capability check, pairing, typing in a visible text field, F12 mute/unmute, and clean shutdown, with sensitive data removed.
 
----
+## Development and contributions
 
-## 📂 Project Structure
+Before a substantial change, open an issue with the Windows build, Python version, Bluetooth adapter/driver, receiving-device model/OS, capability-check output, and sanitized logs. Keep claims aligned with observed evidence, add focused tests, and run the full test suite. Do not commit credentials, pairing identifiers, personal input, or unredacted logs.
+
+### Roadmap
+
+1. Publish repeatable, redacted real-device evidence and record both successful and failed compatibility results.
+2. Add hardware-in-the-loop tests for pairing, notification delivery, reconnect, and stuck-key recovery.
+3. Improve reconnection, host-state handling, and layout/special-key support only with corresponding tests.
+
+## Project layout
 
 ```text
 AirKeys/
-├── docs/
-│   ├── feasibility.md          # Windows Bluetooth and HOGP feasibility notes
-│   └── reverse_engineering.md  # BLE HID protocol and scancode research
-├── scripts/
-│   ├── off.bat                 # Turn AirKeys off
-│   ├── on.bat                  # Turn AirKeys on
-│   ├── status.bat              # Check service status
-│   ├── switch.bat              # Toggle on/off
-│   └── switch.py               # Interactive/CLI switch helper
+├── scripts/                 # Windows command shortcuts
 ├── src/
-│   ├── __init__.py
-│   ├── ble_hid_service.py      # BLE HID-over-GATT service
-│   ├── hid_report.py           # HID keyboard reports and scancodes
-│   └── main.py                 # Keyboard capture and runtime management
-├── tests/
-│   ├── __init__.py
-│   ├── test_cli.py             # CLI and process-management tests
-│   └── test_hid_report.py      # HID report and modifier tests
-├── cli.py                      # Main command-line interface
-├── requirements.txt            # Python dependencies
-└── README.md                   # Project documentation
+│   ├── main.py              # Runtime and keyboard capture
+│   ├── hid_report.py        # HID report format and key mapping
+│   └── ble_hid_service.py   # WinRT BLE HOGP service
+├── tests/                   # Unit and mocked BLE lifecycle tests
+├── cli.py                   # Service control CLI
+├── requirements.txt         # Python dependencies
+├── setup.bat                # Windows setup helper
+└── README.md                # Project documentation
 ```
-
----
-
-## 🧠 Development Journey & Lessons Learned
-
-AirKeys began with a practical question: could a laptop act as a keyboard for a phone instead of merely connecting to a keyboard?
-
-The experiment involved researching the difference between Bluetooth host and peripheral roles, exploring HID behavior, working with key reports, and troubleshooting connection and input delivery.
-
-The development notes for the original AirKeys experiment record an initial prototype session of approximately 30 minutes and around 20 minutes of active troubleshooting. They also record a practical test in which text was typed on a phone using the program. These are observations from that experiment, not a claim of universal compatibility or production readiness.
-
-### Key takeaways
-
-- **Pairing is not the same as input:** The correct Bluetooth role and HID service must be available.
-- **Hardware support matters:** Adapters, drivers, and operating-system APIs can determine whether peripheral emulation is possible.
-- **Protocol details matter:** Key presses, releases, and modifier states must be encoded and handled consistently.
-- **Test on real devices:** Unit tests are useful, but real Bluetooth behavior needs hardware testing.
-- **Small experiments can teach a lot:** A simple convenience idea can lead to meaningful work in wireless communication and system integration.
-
-## 🛣️ Possible Next Steps
-
-- 🔄 Improve pairing and reconnection reliability.
-- ⌨️ Expand keyboard-layout, shortcut, modifier, and special-character handling.
-- 📱 Test across more Android versions, phones, and Bluetooth adapters.
-- 🖥️ Add a lightweight status interface for connecting and disconnecting.
-- 📖 Improve setup guidance and reproducible troubleshooting.
-- 🧪 Expand automated tests and document hardware-specific limitations.
-
-These are potential improvements, not features guaranteed to be available in the current prototype.
-
-### Documentation roadmap
-
-1. Publish a redacted, continuous real-device demonstration with the hardware and software details recorded in `docs/demo.md`.
-2. Convert successful and failed physical-device results into dated entries in the compatibility matrix.
-3. Add hardware-in-the-loop verification for pairing, subscription, notification delivery, reconnect, and stuck-key recovery.
-4. Expand supported key behavior only alongside report-level and device-level tests.
-
----
-
-## 🤝 Contributing & Feedback
-
-This is an experimental personal engineering project. If you try it on a different Windows machine or Bluetooth adapter, useful feedback includes:
-
-- Windows version and Bluetooth adapter model
-- Receiving device and operating-system version
-- Whether the device can discover and pair with AirKeys
-- Whether keyboard input works after pairing
-- Any relevant diagnostic output, with personal information removed
-
-Please avoid reporting a device as supported based on Bluetooth discovery alone; successful keyboard input is the meaningful test.
-
-## 📌 Project Details
-
-- **Name:** AirKeys
-- **Category:** Bluetooth HID emulation, wireless communication, system integration
-- **Primary platform:** Windows
-- **Implementation language:** Python
-- **Target experience:** Use a laptop keyboard to enter text on a compatible mobile device
-- **Status:** Experimental prototype
-
----
-
-<p align="center">
-  <strong>Built out of curiosity. Tested through experimentation. ⌨️📡</strong><br>
-  <em>Making everyday devices do something a little more interesting.</em>
-</p>
