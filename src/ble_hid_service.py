@@ -28,7 +28,7 @@ from winrt.windows.devices.bluetooth.genericattributeprofile import (
 )
 from winrt.windows.storage.streams import DataWriter
 
-from hid_report import KEYBOARD_REPORT_MAP
+from hid_report import KEYBOARD_REPORT_MAP, build_shortcut_reports
 
 log = logging.getLogger("ble_hid")
 
@@ -133,6 +133,20 @@ class BleHidService:
                 # and notification.  Return a result that callers must handle.
                 log.error("Failed to send HID report: %s", e)
                 return False
+
+    async def send_shortcut(self, shortcut: str, hold_duration: float = 0.05) -> bool:
+        """
+        Send a keyboard shortcut combo (e.g. 'ctrl+c', 'ctrl+v', 'copy', 'paste').
+        Presses the key combo, waits hold_duration, then releases all keys.
+        Returns True if the report was sent to a subscribed host.
+        """
+        press_report, release_report = build_shortcut_reports(shortcut)
+        sent = await self.send_report(press_report)
+        if sent:
+            await asyncio.sleep(hold_duration)
+            await self.send_report(release_report)
+        return sent
+
 
     @property
     def has_subscribers(self) -> bool:

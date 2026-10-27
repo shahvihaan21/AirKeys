@@ -83,8 +83,73 @@ SCAN = {
     'right': 0x4F, 'left': 0x50, 'down': 0x51, 'up': 0x52,
     'delete': 0x4C, 'home': 0x4A, 'end': 0x4D,
     'page_up': 0x4B, 'page_down': 0x4E,
-    'caps_lock': 0x39, 'insert': 0x49,
+    # Additional key aliases
+    'esc': 0x29,
+    'del': 0x4C,
+    'return': 0x28,
+    'pgup': 0x4B,
+    'pgdn': 0x4E,
+    'pageup': 0x4B,
+    'pagedown': 0x4E,
+    'capslock': 0x39,
+    'spacebar': 0x2C,
+    'ins': 0x49,
 }
+
+# Modifiers map for parsing textual shortcut specifications
+MODIFIER_TOKENS = {
+    'ctrl': MOD_LEFT_CTRL,
+    'control': MOD_LEFT_CTRL,
+    'lctrl': MOD_LEFT_CTRL,
+    'left_ctrl': MOD_LEFT_CTRL,
+    'leftctrl': MOD_LEFT_CTRL,
+    'rctrl': MOD_RIGHT_CTRL,
+    'right_ctrl': MOD_RIGHT_CTRL,
+    'rightctrl': MOD_RIGHT_CTRL,
+    'shift': MOD_LEFT_SHIFT,
+    'lshift': MOD_LEFT_SHIFT,
+    'left_shift': MOD_LEFT_SHIFT,
+    'leftshift': MOD_LEFT_SHIFT,
+    'rshift': MOD_RIGHT_SHIFT,
+    'right_shift': MOD_RIGHT_SHIFT,
+    'rightshift': MOD_RIGHT_SHIFT,
+    'alt': MOD_LEFT_ALT,
+    'lalt': MOD_LEFT_ALT,
+    'left_alt': MOD_LEFT_ALT,
+    'leftalt': MOD_LEFT_ALT,
+    'ralt': MOD_RIGHT_ALT,
+    'right_alt': MOD_RIGHT_ALT,
+    'rightalt': MOD_RIGHT_ALT,
+    'altgr': MOD_RIGHT_ALT,
+    'alt_gr': MOD_RIGHT_ALT,
+    'gui': MOD_LEFT_GUI,
+    'win': MOD_LEFT_GUI,
+    'windows': MOD_LEFT_GUI,
+    'cmd': MOD_LEFT_GUI,
+    'command': MOD_LEFT_GUI,
+    'meta': MOD_LEFT_GUI,
+    'super': MOD_LEFT_GUI,
+    'lgui': MOD_LEFT_GUI,
+    'rgui': MOD_RIGHT_GUI,
+    'rwin': MOD_RIGHT_GUI,
+    'rcmd': MOD_RIGHT_GUI,
+}
+
+# Common action aliases
+SHORTCUT_ALIASES = {
+    'copy': 'ctrl+c',
+    'paste': 'ctrl+v',
+    'cut': 'ctrl+x',
+    'select_all': 'ctrl+a',
+    'selectall': 'ctrl+a',
+    'undo': 'ctrl+z',
+    'redo': 'ctrl+y',
+    'save': 'ctrl+s',
+    'find': 'ctrl+f',
+    'new_tab': 'ctrl+t',
+    'close_tab': 'ctrl+w',
+}
+
 
 # Characters produced by the US keyboard usages above that require Shift.  HID
 # sends key *positions*, not Unicode characters: the receiving host applies its
@@ -227,8 +292,85 @@ def pynput_key_to_scancode(key) -> tuple[int | None, int | None]:
             unshifted = SHIFTED_CHARACTERS.get(char)
             if unshifted is not None:
                 return (MOD_LEFT_SHIFT, SCAN[unshifted])
+            # Handle control characters produced when Ctrl is held (ASCII 1-26 -> 'a'-'z')
+            code = ord(char)
+            if 1 <= code <= 26:
+                ctrl_char = chr(ord('a') + code - 1)
+                return (None, SCAN.get(ctrl_char))
             return (None, SCAN.get(char))
     except AttributeError:
         pass
 
+    # Fallback to virtual key code (vk), especially for key release or unprintable shortcuts
+    vk = getattr(key, "vk", None)
+    if vk is not None:
+        if 0x41 <= vk <= 0x5A:  # 'A'-'Z'
+            return (None, SCAN.get(chr(vk).lower()))
+        elif 0x30 <= vk <= 0x39:  # '0'-'9'
+            return (None, SCAN.get(chr(vk)))
+
     return (None, None)
+
+
+def parse_shortcut(shortcut: str) -> tuple[int, int]:
+    """
+    Parse a shortcut specification (e.g. 'ctrl+c', 'ctrl+v', 'ctrl+shift+z', 'alt+tab', 'copy')
+    into (modifier_mask, scancode).
+
+    Raises ValueError if the shortcut format is invalid or key is unknown.
+    """
+    if not isinstance(shortcut, str):
+        raise ValueError(f"Shortcut must be a string, got {type(shortcut).__name__}")
+
+    clean = shortcut.strip().lower()
+    if not clean:
+        raise ValueError("Shortcut cannot be empty.")
+
+    # Resolve aliases like "copy" -> "ctrl+c"
+    if clean in SHORTCUT_ALIASES:
+        clean = SHORTCUT_ALIASES[clean]
+
+    parts = [p.strip() for p in clean.split("+") if p.strip()]
+    if not parts:
+        raise ValueError(f"Invalid shortcut: '{shortcut}'")
+
+    mod_mask = MOD_NONE
+    key_scancode = None
+
+    for i, part in enumerate(parts):
+        if part in MODIFIER_TOKENS:
+            mod_mask |= MODIFIER_TOKENS[part]
+        else:
+            if key_scancode is not None:
+                raise ValueError(
+                    f"Multiple non-modifier keys specified in shortcut '{shortcut}': "
+                    f"'{parts[i-1]}' and '{part}'"
+                )
+            if part in SCAN:
+                key_scancode = SCAN[part]
+            elif part in SHIFTED_CHARACTERS:
+                mod_mask |= MOD_LEFT_SHIFT
+                key_scancode = SCAN[SHIFTED_CHARACTERS[part]]
+            else:
+                raise ValueError(f"Unknown key '{part}' in shortcut '{shortcut}'")
+
+    if key_scancode is None:
+        raise ValueError(f"No key specified in shortcut '{shortcut}' (only modifiers found)")
+
+    return mod_mask, key_scancode
+
+
+def build_shortcut_reports(shortcut: str) -> tuple[bytes, bytes]:
+    """
+    Build (press_report, release_report) for a given shortcut.
+    Example:
+        press, release = build_shortcut_reports('ctrl+c')
+    """
+    mod_mask, scancode = parse_shortcut(shortcut)
+    builder = HidReportBuilder()
+    if mod_mask:
+        builder.press_modifier(mod_mask)
+    press_report = builder.press_key(scancode)
+    release_report = builder.release_all()
+    return press_report, release_report
+

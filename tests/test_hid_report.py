@@ -131,6 +131,87 @@ class TestKeyTranslation(unittest.TestCase):
         self.assertIsNone(mod)
         self.assertEqual(sc, SCAN["enter"])
 
+    def test_control_character_mapping(self):
+        # When Ctrl is held in Windows, pynput produces ASCII control characters (1-26)
+        # Ctrl+C is \x03, Ctrl+V is \x16, Ctrl+A is \x01, Ctrl+Z is \x1a
+        for char_code, letter in [(1, "a"), (3, "c"), (22, "v"), (24, "x"), (26, "z")]:
+            with self.subTest(letter=letter):
+                key = MagicMock()
+                key.char = chr(char_code)
+                mod, sc = pynput_key_to_scancode(key)
+                self.assertIsNone(mod)
+                self.assertEqual(sc, SCAN[letter])
+
+    def test_vk_fallback_mapping(self):
+        # On key release or with unprintable characters, char might be None while vk is present
+        key = MagicMock()
+        key.char = None
+        key.vk = 67  # 'C'
+        mod, sc = pynput_key_to_scancode(key)
+        self.assertIsNone(mod)
+        self.assertEqual(sc, SCAN["c"])
+
+
+class TestShortcuts(unittest.TestCase):
+    def test_parse_common_shortcuts(self):
+        from hid_report import parse_shortcut, MOD_LEFT_CTRL, MOD_LEFT_SHIFT, MOD_LEFT_ALT, MOD_LEFT_GUI
+
+        mod, sc = parse_shortcut("ctrl+c")
+        self.assertEqual(mod, MOD_LEFT_CTRL)
+        self.assertEqual(sc, SCAN["c"])
+
+        mod, sc = parse_shortcut("ctrl+v")
+        self.assertEqual(mod, MOD_LEFT_CTRL)
+        self.assertEqual(sc, SCAN["v"])
+
+        mod, sc = parse_shortcut("Ctrl + Shift + Z")
+        self.assertEqual(mod, MOD_LEFT_CTRL | MOD_LEFT_SHIFT)
+        self.assertEqual(sc, SCAN["z"])
+
+        mod, sc = parse_shortcut("alt+tab")
+        self.assertEqual(mod, MOD_LEFT_ALT)
+        self.assertEqual(sc, SCAN["tab"])
+
+        mod, sc = parse_shortcut("win+d")
+        self.assertEqual(mod, MOD_LEFT_GUI)
+        self.assertEqual(sc, SCAN["d"])
+
+    def test_shortcut_aliases(self):
+        from hid_report import parse_shortcut, MOD_LEFT_CTRL
+
+        for alias, target_key in [("copy", "c"), ("paste", "v"), ("cut", "x"), ("select_all", "a"), ("undo", "z")]:
+            with self.subTest(alias=alias):
+                mod, sc = parse_shortcut(alias)
+                self.assertEqual(mod, MOD_LEFT_CTRL)
+                self.assertEqual(sc, SCAN[target_key])
+
+    def test_build_shortcut_reports(self):
+        from hid_report import build_shortcut_reports, MOD_LEFT_CTRL
+
+        press, release = build_shortcut_reports("ctrl+c")
+        self.assertEqual(len(press), 8)
+        self.assertEqual(press[0], MOD_LEFT_CTRL)
+        self.assertEqual(press[2], SCAN["c"])
+
+        self.assertEqual(len(release), 8)
+        self.assertEqual(release, b"\x00" * 8)
+
+    def test_invalid_shortcuts_raise_value_error(self):
+        from hid_report import parse_shortcut
+
+        with self.assertRaises(ValueError):
+            parse_shortcut("")
+
+        with self.assertRaises(ValueError):
+            parse_shortcut("ctrl")  # only modifier, no key
+
+        with self.assertRaises(ValueError):
+            parse_shortcut("ctrl+c+v")  # multiple keys
+
+        with self.assertRaises(ValueError):
+            parse_shortcut("ctrl+nonexistentkey123")
+
 
 if __name__ == "__main__":
     unittest.main()
+

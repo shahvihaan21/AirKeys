@@ -37,6 +37,8 @@ PID_FILE = os.path.join(ROOT_DIR, ".airkeys.pid")
 LEGACY_PID_FILE = os.path.join(ROOT_DIR, ".laptopkey.pid")
 STOP_FILE = os.path.join(ROOT_DIR, ".airkeys.stop")
 LEGACY_STOP_FILE = os.path.join(ROOT_DIR, ".laptopkey.stop")
+CMD_FILE = os.path.join(ROOT_DIR, ".airkeys.cmd")
+LEGACY_CMD_FILE = os.path.join(ROOT_DIR, ".laptopkey.cmd")
 LOG_FILE = os.path.join(ROOT_DIR, "airkeys.log")
 LEGACY_LOG_FILE = os.path.join(ROOT_DIR, "laptopkey.log")
 
@@ -463,6 +465,57 @@ def cmd_restart(args=None):
     return cmd_on(args)
 
 
+def send_shortcut_ipc(shortcut: str) -> tuple[bool, str]:
+    """
+    Send a shortcut command to running AirKeys service via IPC.
+    Returns (success, message).
+    """
+    pid = get_current_pid()
+    if pid is None:
+        return False, "AirKeys is not running. Turn it ON first with: python cli.py on"
+
+    # Validate shortcut format
+    try:
+        sys.path.insert(0, os.path.join(ROOT_DIR, "src"))
+        from hid_report import parse_shortcut
+        parse_shortcut(shortcut)
+    except Exception as e:
+        return False, f"Invalid shortcut: {e}"
+
+    try:
+        with open(CMD_FILE, "a", encoding="utf-8") as f:
+            f.write(f"shortcut:{shortcut}\n")
+        return True, f"Sent shortcut '{shortcut}' to AirKeys (PID: {pid})."
+    except Exception as e:
+        return False, f"Could not write to command queue: {e}"
+
+
+def cmd_shortcut(args=None):
+    """Send a shortcut key (e.g. ctrl+c, ctrl+v) to the connected device."""
+    combo = getattr(args, "combo", None)
+    if not combo:
+        print("\n  Available Shortcut Examples:")
+        print("    python cli.py shortcut ctrl+c     (Copy)")
+        print("    python cli.py shortcut ctrl+v     (Paste)")
+        print("    python cli.py shortcut ctrl+x     (Cut)")
+        print("    python cli.py shortcut ctrl+a     (Select All)")
+        print("    python cli.py shortcut ctrl+z     (Undo)")
+        print("    python cli.py shortcut copy       (Alias for ctrl+c)")
+        print("    python cli.py shortcut paste      (Alias for ctrl+v)")
+        print("    python cli.py shortcut alt+tab    (Switch apps)")
+        print("    python cli.py shortcut win+d      (Show desktop)")
+        print()
+        return 0
+
+    success, msg = send_shortcut_ipc(combo)
+    if success:
+        print(f"\n  ✓ {msg}\n")
+        return 0
+    else:
+        print(f"\n  ❌ {msg}\n")
+        return 1
+
+
 # =====================================================================
 # Main Parser
 # =====================================================================
@@ -473,12 +526,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python cli.py on          Turn ON in background
-  python cli.py off         Turn OFF cleanly
-  python cli.py switch      Toggle ON/OFF switch
-  python cli.py status      View current status
-  python cli.py logs        View recent log entries
-  python cli.py check       Check Bluetooth adapter
+  python cli.py on                  Turn ON in background
+  python cli.py off                 Turn OFF cleanly
+  python cli.py switch              Toggle ON/OFF switch
+  python cli.py shortcut ctrl+c     Send Ctrl+C shortcut to phone
+  python cli.py shortcut ctrl+v     Send Ctrl+V shortcut to phone
+  python cli.py status              View current status
+  python cli.py logs                View recent log entries
+  python cli.py check               Check Bluetooth adapter
         """,
     )
 
@@ -508,6 +563,14 @@ Examples:
     # restart
     subparsers.add_parser("restart", help="Restart AirKeys")
 
+    # shortcut
+    parser_shortcut = subparsers.add_parser(
+        "shortcut", aliases=["send", "sc", "key"], help="Send a keyboard shortcut (e.g. ctrl+c, ctrl+v)"
+    )
+    parser_shortcut.add_argument(
+        "combo", nargs="?", default=None, help="Shortcut combination (e.g. ctrl+c, ctrl+v, copy, paste)"
+    )
+
     args = parser.parse_args()
 
     command = args.command
@@ -525,6 +588,8 @@ Examples:
         sys.exit(cmd_check(args))
     elif command == "restart":
         sys.exit(cmd_restart(args))
+    elif command in ("shortcut", "send", "sc", "key"):
+        sys.exit(cmd_shortcut(args))
     else:
         # Default with no arguments: show status and quick toggle option
         pid = get_current_pid()
@@ -536,12 +601,13 @@ Examples:
         print(f"  Current Switch State: {state}")
         print()
         print("  Available Commands:")
-        print("    python cli.py switch       <-- Flip the ON / OFF switch")
-        print("    python cli.py on           <-- Turn ON")
-        print("    python cli.py off          <-- Turn OFF")
-        print("    python cli.py status       <-- View detailed status")
-        print("    python cli.py logs         <-- View recent logs")
-        print("    python cli.py check        <-- Check Bluetooth hardware")
+        print("    python cli.py switch            <-- Flip the ON / OFF switch")
+        print("    python cli.py on                <-- Turn ON")
+        print("    python cli.py off               <-- Turn OFF")
+        print("    python cli.py shortcut ctrl+c   <-- Send shortcut (Ctrl+C, Ctrl+V, etc.)")
+        print("    python cli.py status            <-- View detailed status")
+        print("    python cli.py logs              <-- View recent logs")
+        print("    python cli.py check             <-- Check Bluetooth hardware")
         print("  ================================================================")
         print()
         sys.exit(0)
@@ -549,3 +615,4 @@ Examples:
 
 if __name__ == "__main__":
     main()
+

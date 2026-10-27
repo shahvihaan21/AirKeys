@@ -137,3 +137,20 @@ class TestBleHidService(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await service.send_report(b"short")
 
+    async def test_send_shortcut_sends_press_and_release(self):
+        service = self.module.BleHidService()
+        await service._create_hid_service()
+        characteristic = service._input_report_char
+        characteristic.notifications.clear()
+        
+        result = await service.send_shortcut("ctrl+c", hold_duration=0.01)
+        self.assertTrue(result)
+        # Should have sent 2 notifications: press and release
+        self.assertEqual(len(characteristic.notifications), 2)
+        press_rep = characteristic.notifications[0]
+        release_rep = characteristic.notifications[1]
+        self.assertEqual(press_rep[0], 0x01)  # MOD_LEFT_CTRL
+        self.assertEqual(press_rep[2], 0x06)  # 'c' scancode
+        self.assertEqual(release_rep, b"\x00" * 8)
+
+

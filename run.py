@@ -43,6 +43,14 @@ def status():
     return cli.cmd_status()
 
 
+def shortcut(combo=None):
+    """Send shortcut key (e.g. 'ctrl+c', 'ctrl+v')."""
+    class ShortcutArgs:
+        def __init__(self, c):
+            self.combo = c
+    return cli.cmd_shortcut(ShortcutArgs(combo))
+
+
 def toggle():
     """Toggle Start / Stop."""
     pid = cli.get_current_pid()
@@ -70,6 +78,7 @@ def interactive_menu():
         print(f"  [2]      ->  Stop")
         print(f"  [3]      ->  Status & Recent Logs")
         print(f"  [4]      ->  Run in Foreground (Live debug)")
+        print(f"  [5]      ->  Send Shortcut Key (Ctrl+C, Ctrl+V, etc.)")
         print(f"  [0/q]    ->  Exit")
         print("=" * 54)
 
@@ -96,6 +105,34 @@ def interactive_menu():
                 pass
         elif choice in ("4", "fg", "foreground"):
             start(foreground=True)
+        elif choice in ("5", "shortcut", "sc"):
+            print("\n  Quick Shortcuts:")
+            print("    [1] Ctrl+C (Copy)")
+            print("    [2] Ctrl+V (Paste)")
+            print("    [3] Ctrl+X (Cut)")
+            print("    [4] Ctrl+A (Select All)")
+            print("    [5] Ctrl+Z (Undo)")
+            print("    [6] Custom (Enter any combination)")
+            try:
+                sub = input("  Select shortcut [1-6]: ").strip().lower()
+                mapping = {
+                    "1": "ctrl+c",
+                    "2": "ctrl+v",
+                    "3": "ctrl+x",
+                    "4": "ctrl+a",
+                    "5": "ctrl+z",
+                }
+                if sub in mapping:
+                    shortcut(mapping[sub])
+                elif sub in ("6", "custom", "c"):
+                    custom_sc = input("  Enter shortcut combo (e.g. ctrl+shift+z, alt+tab): ").strip()
+                    if custom_sc:
+                        shortcut(custom_sc)
+                else:
+                    print("  Cancelled.")
+            except (KeyboardInterrupt, EOFError):
+                pass
+            time.sleep(0.8)
         elif choice in ("0", "q", "exit", "quit"):
             print("Bye!")
             break
@@ -128,6 +165,11 @@ def main():
         sys.exit(status())
     elif cmd in ("fg", "foreground", "run"):
         sys.exit(start(foreground=True))
+    elif cmd in ("shortcut", "sc", "send"):
+        combo = args[1] if len(args) > 1 else None
+        sys.exit(shortcut(combo))
+    elif cmd in ("copy", "paste", "cut", "undo"):
+        sys.exit(shortcut(cmd))
     elif cmd in ("help", "h"):
         print(__doc__)
     else:
@@ -138,3 +180,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

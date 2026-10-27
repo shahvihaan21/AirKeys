@@ -36,7 +36,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from pynput import keyboard as kb
 
-from hid_report import HidReportBuilder, pynput_key_to_scancode
+from hid_report import (
+    HidReportBuilder,
+    pynput_key_to_scancode,
+    build_shortcut_reports,
+    parse_shortcut,
+)
 from ble_hid_service import BleHidService
 
 # ---- Configuration ----
@@ -44,6 +49,8 @@ PID_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".airke
 LEGACY_PID_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".laptopkey.pid"))
 STOP_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".airkeys.stop"))
 LEGACY_STOP_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".laptopkey.stop"))
+CMD_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".airkeys.cmd"))
+LEGACY_CMD_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".laptopkey.cmd"))
 LOG_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "airkeys.log"))
 
 # ---- Logging ----
@@ -107,6 +114,65 @@ def _toggle_forwarding():
         with _report_lock:
             _schedule_send(_report_builder.release_all())
         log.info("⏸ FORWARDING MUTED: Keystrokes stay on Laptop (Press F12 to resume)")
+
+
+async def _send_shortcut_coro(shortcut: str, hold_duration: float = 0.05) -> bool:
+    """Send shortcut combo asynchronously over BLE."""
+    if _ble_service is None or not _is_forwarding_enabled:
+        log.warning(f"Cannot send shortcut '{shortcut}': BLE service not active or forwarding muted.")
+        return False
+    try:
+        press_report, release_report = build_shortcut_reports(shortcut)
+        with _report_lock:
+            sent = await _ble_service.send_report(press_report)
+        if sent:
+            await asyncio.sleep(hold_duration)
+            with _report_lock:
+                await _ble_service.send_report(release_report)
+            log.info(f"✓ Sent shortcut over BLE: {shortcut}")
+            return True
+        else:
+            log.warning(f"Could not send shortcut '{shortcut}': no connected/subscribed device.")
+            with _report_lock:
+                _report_builder.release_all()
+            return False
+    except Exception as e:
+        log.error(f"Error sending shortcut '{shortcut}': {e}")
+        with _report_lock:
+            _report_builder.release_all()
+        return False
+
+
+def send_shortcut(shortcut: str, hold_duration: float = 0.05) -> bool:
+    """
+    Send a shortcut combo (e.g. 'ctrl+c', 'ctrl+v', 'copy', 'paste') over BLE.
+    If the BLE event loop is running in this process, dispatches directly.
+    Otherwise, queues it via CMD_FILE for the background AirKeys process.
+    """
+    if _loop is not None and not _loop.is_closed() and _ble_service is not None:
+        future = asyncio.run_coroutine_threadsafe(
+            _send_shortcut_coro(shortcut, hold_duration), _loop
+        )
+        try:
+            return future.result(timeout=2.0)
+        except Exception as e:
+            log.error(f"Failed waiting for shortcut '{shortcut}': {e}")
+            return False
+    else:
+        return queue_shortcut_cmd(shortcut)
+
+
+def queue_shortcut_cmd(shortcut: str) -> bool:
+    """Queue a shortcut command into CMD_FILE for the running AirKeys process."""
+    try:
+        parse_shortcut(shortcut)  # validate syntax first
+        with open(CMD_FILE, "a", encoding="utf-8") as f:
+            f.write(f"shortcut:{shortcut}\n")
+        return True
+    except Exception as e:
+        log.error(f"Could not queue shortcut command: {e}")
+        return False
+
 
 
 def _on_key_press(key):
@@ -236,7 +302,27 @@ async def _main():
             if os.path.exists(STOP_FILE) or os.path.exists(LEGACY_STOP_FILE):
                 log.info("Stop sentinel detected from CLI — stopping service.")
                 break
-            await asyncio.sleep(0.2)
+
+            # Check for queued commands (e.g. shortcuts)
+            for c_path in (CMD_FILE, LEGACY_CMD_FILE):
+                if os.path.exists(c_path):
+                    proc_path = c_path + ".proc"
+                    try:
+                        os.replace(c_path, proc_path)
+                        with open(proc_path, "r", encoding="utf-8") as f:
+                            lines = [line.strip() for line in f if line.strip()]
+                        try:
+                            os.remove(proc_path)
+                        except Exception:
+                            pass
+                        for line in lines:
+                            if line.startswith("shortcut:"):
+                                shortcut_str = line[len("shortcut:"):].strip()
+                                asyncio.create_task(_send_shortcut_coro(shortcut_str))
+                    except Exception as e:
+                        log.warning(f"Error handling cmd file ({c_path}): {e}")
+
+            await asyncio.sleep(0.1)
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
@@ -250,7 +336,7 @@ async def _main():
             except Exception as e:
                 log.warning(f"Error during BLE shutdown: {e}")
         _remove_pid()
-        for s_path in (STOP_FILE, LEGACY_STOP_FILE):
+        for s_path in (STOP_FILE, LEGACY_STOP_FILE, CMD_FILE, LEGACY_CMD_FILE):
             if os.path.exists(s_path):
                 try:
                     os.remove(s_path)

@@ -46,6 +46,28 @@ class TestCliHelpers(unittest.TestCase):
             self.assertEqual(cli.cmd_on(), 2)
         popen.assert_not_called()
 
+    def test_cmd_shortcut_when_service_not_running(self):
+        """Should fail cleanly when AirKeys is not running."""
+        with patch("cli.get_current_pid", return_value=None):
+            args = unittest.mock.Mock(combo="ctrl+c")
+            self.assertEqual(cli.cmd_shortcut(args), 1)
+
+    def test_cmd_shortcut_writes_to_cmd_file_when_running(self):
+        """Should write shortcut command to CMD_FILE when service is running."""
+        mock_file = unittest.mock.mock_open()
+        with patch("cli.get_current_pid", return_value=12345), \
+             patch("builtins.open", mock_file):
+            args = unittest.mock.Mock(combo="ctrl+v")
+            self.assertEqual(cli.cmd_shortcut(args), 0)
+        mock_file().write.assert_called_with("shortcut:ctrl+v\n")
+
+    def test_cmd_shortcut_invalid_combo(self):
+        """Invalid shortcut combo should return error code 1."""
+        with patch("cli.get_current_pid", return_value=12345):
+            args = unittest.mock.Mock(combo="invalid_key_combo_xyz")
+            self.assertEqual(cli.cmd_shortcut(args), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
+
