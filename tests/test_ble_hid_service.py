@@ -153,4 +153,30 @@ class TestBleHidService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(press_rep[2], 0x06)  # 'c' scancode
         self.assertEqual(release_rep, b"\x00" * 8)
 
+    async def test_send_text_sends_keystrokes(self):
+        service = self.module.BleHidService()
+        await service._create_hid_service()
+        characteristic = service._input_report_char
+        characteristic.notifications.clear()
+
+        sent_count = await service.send_text("Hi", key_delay=0.001)
+        self.assertEqual(sent_count, 2)
+        # Each character sends press and release -> 4 notifications total
+        self.assertEqual(len(characteristic.notifications), 4)
+
+        # First char: 'H' (with Left Shift)
+        press_h = characteristic.notifications[0]
+        rel_h = characteristic.notifications[1]
+        self.assertEqual(press_h[0], 0x02)  # MOD_LEFT_SHIFT
+        self.assertEqual(press_h[2], 0x0B)  # 'h' scancode
+        self.assertEqual(rel_h, b"\x00" * 8)
+
+        # Second char: 'i'
+        press_i = characteristic.notifications[2]
+        rel_i = characteristic.notifications[3]
+        self.assertEqual(press_i[0], 0x00)
+        self.assertEqual(press_i[2], 0x0C)  # 'i' scancode
+        self.assertEqual(rel_i, b"\x00" * 8)
+
+
 

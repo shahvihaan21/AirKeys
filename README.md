@@ -59,13 +59,14 @@ python cli.py off
 | `python cli.py off` | Requests a graceful shutdown. |
 | `python cli.py switch` | Toggles the background service. |
 | `python cli.py shortcut <combo>` | Sends a shortcut key combo (e.g. `ctrl+c`, `ctrl+v`, `copy`, `paste`, `alt+tab`). |
+| `python cli.py type <text>` | Types text or clipboard content (`--clipboard`) onto the connected device. |
 | `python cli.py status` | Shows process and service status. |
 | `python cli.py check` | Checks dependencies, adapter capability, and local HID service creation. |
 | `python cli.py logs` | Prints recent diagnostic logs. |
 | `python cli.py restart` | Restarts the service. |
 
 Windows shortcuts for the common actions are available in `scripts/`.
-Also, `python run.py` provides an interactive menu with option `[5]` to send shortcuts (`Ctrl+C`, `Ctrl+V`, `Ctrl+X`, `Ctrl+A`, `Ctrl+Z`, or custom).
+Also, `python run.py` provides an interactive menu with options `[5]` to send shortcuts (`Ctrl+C`, `Ctrl+V`, `Ctrl+X`, etc.) and `[6]` to type/send custom or clipboard text.
 
 
 ### Pair a receiving device

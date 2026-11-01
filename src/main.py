@@ -12,6 +12,7 @@ Hotkeys:
   - Scroll Lock: Clean shutdown & disconnect
 """
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -41,6 +42,7 @@ from hid_report import (
     pynput_key_to_scancode,
     build_shortcut_reports,
     parse_shortcut,
+    text_to_hid_reports,
 )
 from ble_hid_service import BleHidService
 
@@ -171,6 +173,72 @@ def queue_shortcut_cmd(shortcut: str) -> bool:
         return True
     except Exception as e:
         log.error(f"Could not queue shortcut command: {e}")
+        return False
+
+
+async def _send_text_coro(text: str, key_delay: float = 0.015) -> int:
+    """Send text string over BLE HID."""
+    if _ble_service is None or not _is_forwarding_enabled:
+        log.warning("Cannot send text: BLE service not active or forwarding muted.")
+        return 0
+    try:
+        pairs = text_to_hid_reports(text)
+        if not pairs:
+            log.warning("No mappable characters found in text.")
+            return 0
+        count = 0
+        for press_report, release_report in pairs:
+            with _report_lock:
+                sent = await _ble_service.send_report(press_report)
+            if not sent:
+                log.warning(f"Could not send character {count + 1}/{len(pairs)}: no connected/subscribed device.")
+                with _report_lock:
+                    _report_builder.release_all()
+                break
+            if key_delay > 0:
+                await asyncio.sleep(key_delay)
+            with _report_lock:
+                await _ble_service.send_report(release_report)
+            if key_delay > 0:
+                await asyncio.sleep(key_delay)
+            count += 1
+        log.info(f"✓ Sent {count}/{len(pairs)} characters over BLE.")
+        return count
+    except Exception as e:
+        log.error(f"Error sending text: {e}")
+        with _report_lock:
+            _report_builder.release_all()
+        return 0
+
+
+def send_text(text: str, key_delay: float = 0.015) -> int:
+    """
+    Send text over BLE.
+    If the BLE event loop is running in this process, dispatches directly.
+    Otherwise, queues it via CMD_FILE for the background AirKeys process.
+    """
+    if _loop is not None and not _loop.is_closed() and _ble_service is not None:
+        future = asyncio.run_coroutine_threadsafe(
+            _send_text_coro(text, key_delay), _loop
+        )
+        try:
+            return future.result(timeout=10.0)
+        except Exception as e:
+            log.error(f"Failed waiting for text sending: {e}")
+            return 0
+    else:
+        return 1 if queue_text_cmd(text) else 0
+
+
+def queue_text_cmd(text: str) -> bool:
+    """Queue a text typing command into CMD_FILE for the running AirKeys process."""
+    try:
+        payload = json.dumps(text)
+        with open(CMD_FILE, "a", encoding="utf-8") as f:
+            f.write(f"text:{payload}\n")
+        return True
+    except Exception as e:
+        log.error(f"Could not queue text command: {e}")
         return False
 
 
@@ -319,6 +387,15 @@ async def _main():
                             if line.startswith("shortcut:"):
                                 shortcut_str = line[len("shortcut:"):].strip()
                                 asyncio.create_task(_send_shortcut_coro(shortcut_str))
+                            elif line.startswith("text:"):
+                                raw_payload = line[len("text:"):].strip()
+                                try:
+                                    text_str = json.loads(raw_payload)
+                                    if not isinstance(text_str, str):
+                                        text_str = str(text_str)
+                                except Exception:
+                                    text_str = raw_payload
+                                asyncio.create_task(_send_text_coro(text_str))
                     except Exception as e:
                         log.warning(f"Error handling cmd file ({c_path}): {e}")
 

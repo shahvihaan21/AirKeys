@@ -51,6 +51,15 @@ def shortcut(combo=None):
     return cli.cmd_shortcut(ShortcutArgs(combo))
 
 
+def type_text(text=None, clipboard=False):
+    """Send / type text on the connected device."""
+    class TypeArgs:
+        def __init__(self, t, c):
+            self.text = [t] if isinstance(t, str) else t
+            self.clipboard = c
+    return cli.cmd_type(TypeArgs(text, clipboard))
+
+
 def toggle():
     """Toggle Start / Stop."""
     pid = cli.get_current_pid()
@@ -79,6 +88,7 @@ def interactive_menu():
         print(f"  [3]      ->  Status & Recent Logs")
         print(f"  [4]      ->  Run in Foreground (Live debug)")
         print(f"  [5]      ->  Send Shortcut Key (Ctrl+C, Ctrl+V, etc.)")
+        print(f"  [6]      ->  Type / Send Text (or Clipboard)")
         print(f"  [0/q]    ->  Exit")
         print("=" * 54)
 
@@ -133,6 +143,23 @@ def interactive_menu():
             except (KeyboardInterrupt, EOFError):
                 pass
             time.sleep(0.8)
+        elif choice in ("6", "type", "text"):
+            print("\n  Type / Send Text to Phone:")
+            print("    [1] Type custom text")
+            print("    [2] Paste text from Clipboard")
+            try:
+                sub = input("  Select option [1-2]: ").strip().lower()
+                if sub in ("1", "custom", "t"):
+                    txt = input("  Enter text to send: ")
+                    if txt:
+                        type_text(txt)
+                elif sub in ("2", "clipboard", "c", "clip"):
+                    type_text(clipboard=True)
+                else:
+                    print("  Cancelled.")
+            except (KeyboardInterrupt, EOFError):
+                pass
+            time.sleep(0.8)
         elif choice in ("0", "q", "exit", "quit"):
             print("Bye!")
             break
@@ -168,6 +195,9 @@ def main():
     elif cmd in ("shortcut", "sc", "send"):
         combo = args[1] if len(args) > 1 else None
         sys.exit(shortcut(combo))
+    elif cmd in ("type", "text"):
+        txt = " ".join(args[1:]) if len(args) > 1 else None
+        sys.exit(type_text(txt))
     elif cmd in ("copy", "paste", "cut", "undo"):
         sys.exit(shortcut(cmd))
     elif cmd in ("help", "h"):

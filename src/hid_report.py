@@ -83,7 +83,7 @@ SCAN = {
     'right': 0x4F, 'left': 0x50, 'down': 0x51, 'up': 0x52,
     'delete': 0x4C, 'home': 0x4A, 'end': 0x4D,
     'page_up': 0x4B, 'page_down': 0x4E,
-    # Additional key aliases
+    # Additional key aliases & special keys
     'esc': 0x29,
     'del': 0x4C,
     'return': 0x28,
@@ -92,8 +92,27 @@ SCAN = {
     'pageup': 0x4B,
     'pagedown': 0x4E,
     'capslock': 0x39,
+    'caps_lock': 0x39,
     'spacebar': 0x2C,
     'ins': 0x49,
+    'insert': 0x49,
+    'print_screen': 0x46,
+    'prtsc': 0x46,
+    'printscreen': 0x46,
+    'scroll_lock': 0x47,
+    'scrolllock': 0x47,
+    'pause': 0x48,
+    'break': 0x48,
+    'num_lock': 0x53,
+    'numlock': 0x53,
+    'menu': 0x65,
+    'app': 0x65,
+    'apps': 0x65,
+    # Keypad / Numpad keys
+    'kp_slash': 0x54, 'kp_multiply': 0x55, 'kp_minus': 0x56, 'kp_plus': 0x57,
+    'kp_enter': 0x58, 'kp_period': 0x63,
+    'kp_1': 0x59, 'kp_2': 0x5A, 'kp_3': 0x5B, 'kp_4': 0x5C, 'kp_5': 0x5D,
+    'kp_6': 0x5E, 'kp_7': 0x5F, 'kp_8': 0x60, 'kp_9': 0x61, 'kp_0': 0x62,
 }
 
 # Modifiers map for parsing textual shortcut specifications
@@ -180,6 +199,11 @@ PYNPUT_SPECIAL_MAP = {
     'Key.page_down':  'page_down',
     'Key.caps_lock':  'caps_lock',
     'Key.insert':     'insert',
+    'Key.print_screen': 'print_screen',
+    'Key.scroll_lock':  'scroll_lock',
+    'Key.pause':        'pause',
+    'Key.num_lock':     'num_lock',
+    'Key.menu':         'menu',
     'Key.f1':  'f1',  'Key.f2':  'f2',  'Key.f3':  'f3',  'Key.f4':  'f4',
     'Key.f5':  'f5',  'Key.f6':  'f6',  'Key.f7':  'f7',  'Key.f8':  'f8',
     'Key.f9':  'f9',  'Key.f10': 'f10', 'Key.f11': 'f11', 'Key.f12': 'f12',
@@ -308,6 +332,18 @@ def pynput_key_to_scancode(key) -> tuple[int | None, int | None]:
             return (None, SCAN.get(chr(vk).lower()))
         elif 0x30 <= vk <= 0x39:  # '0'-'9'
             return (None, SCAN.get(chr(vk)))
+        elif 0x60 <= vk <= 0x69:  # Numpad '0'-'9'
+            return (None, SCAN.get(str(vk - 0x60)))
+        elif vk == 0x6A:  # Numpad *
+            return (MOD_LEFT_SHIFT, SCAN.get('8'))
+        elif vk == 0x6B:  # Numpad +
+            return (MOD_LEFT_SHIFT, SCAN.get('='))
+        elif vk == 0x6D:  # Numpad -
+            return (None, SCAN.get('-'))
+        elif vk == 0x6E:  # Numpad .
+            return (None, SCAN.get('.'))
+        elif vk == 0x6F:  # Numpad /
+            return (None, SCAN.get('/'))
 
     return (None, None)
 
@@ -373,4 +409,58 @@ def build_shortcut_reports(shortcut: str) -> tuple[bytes, bytes]:
     press_report = builder.press_key(scancode)
     release_report = builder.release_all()
     return press_report, release_report
+
+
+def char_to_hid_report(char: str) -> tuple[bytes, bytes] | None:
+    """
+    Convert a single character into (press_report, release_report).
+    Returns None if the character cannot be mapped to a US HID keyboard usage.
+    """
+    if not char or len(char) != 1:
+        return None
+
+    builder = HidReportBuilder()
+
+    if char == "\n":
+        press = builder.press_key(SCAN["enter"])
+        return press, builder.release_all()
+    if char == "\t":
+        press = builder.press_key(SCAN["tab"])
+        return press, builder.release_all()
+    if char == " ":
+        press = builder.press_key(SCAN["space"])
+        return press, builder.release_all()
+
+    if "A" <= char <= "Z":
+        press = builder.press_key(SCAN[char.lower()], MOD_LEFT_SHIFT)
+        return press, builder.release_all()
+
+    if char in SHIFTED_CHARACTERS:
+        unshifted = SHIFTED_CHARACTERS[char]
+        press = builder.press_key(SCAN[unshifted], MOD_LEFT_SHIFT)
+        return press, builder.release_all()
+
+    if char in SCAN:
+        press = builder.press_key(SCAN[char])
+        return press, builder.release_all()
+
+    return None
+
+
+def text_to_hid_reports(text: str) -> list[tuple[bytes, bytes]]:
+    """
+    Convert a text string into a sequence of (press_report, release_report) pairs.
+    Newlines (\\r\\n and \\r) are normalized to \\n.
+    Unsupported characters are skipped.
+    """
+    if not text:
+        return []
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    reports = []
+    for ch in normalized:
+        pair = char_to_hid_report(ch)
+        if pair is not None:
+            reports.append(pair)
+    return reports
+
 

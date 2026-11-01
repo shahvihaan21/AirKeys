@@ -212,6 +212,142 @@ class TestShortcuts(unittest.TestCase):
             parse_shortcut("ctrl+nonexistentkey123")
 
 
+class TestKeyMappingsAndSpecialKeys(unittest.TestCase):
+    def test_caps_lock_and_insert(self):
+        mock_caps = MagicMock()
+        mock_caps.__str__.return_value = "Key.caps_lock"
+        mock_caps.char = None
+        mock_caps.vk = None
+        mod, sc = pynput_key_to_scancode(mock_caps)
+        self.assertIsNone(mod)
+        self.assertEqual(sc, 0x39)
+
+        mock_ins = MagicMock()
+        mock_ins.__str__.return_value = "Key.insert"
+        mock_ins.char = None
+        mock_ins.vk = None
+        mod, sc = pynput_key_to_scancode(mock_ins)
+        self.assertIsNone(mod)
+        self.assertEqual(sc, 0x49)
+
+    def test_additional_special_keys(self):
+        special_expectations = {
+            "Key.print_screen": 0x46,
+            "Key.scroll_lock": 0x47,
+            "Key.pause": 0x48,
+            "Key.num_lock": 0x53,
+            "Key.menu": 0x65,
+        }
+        for key_name, expected_sc in special_expectations.items():
+            with self.subTest(key=key_name):
+                mock_key = MagicMock()
+                mock_key.__str__.return_value = key_name
+                mock_key.char = None
+                mock_key.vk = None
+                mod, sc = pynput_key_to_scancode(mock_key)
+                self.assertIsNone(mod)
+                self.assertEqual(sc, expected_sc)
+
+    def test_numpad_virtual_keys(self):
+        # VK_NUMPAD0 (0x60) through VK_NUMPAD9 (0x69)
+        for i in range(10):
+            mock_key = MagicMock()
+            mock_key.__str__.return_value = f"<96+{i}>"
+            mock_key.char = None
+            mock_key.vk = 0x60 + i
+            mod, sc = pynput_key_to_scancode(mock_key)
+            self.assertIsNone(mod)
+            self.assertEqual(sc, SCAN[str(i)])
+
+        # VK_SUBTRACT (0x6D)
+        mock_minus = MagicMock()
+        mock_minus.__str__.return_value = "<109>"
+        mock_minus.char = None
+        mock_minus.vk = 0x6D
+        mod, sc = pynput_key_to_scancode(mock_minus)
+        self.assertIsNone(mod)
+        self.assertEqual(sc, SCAN["-"])
+
+    def test_parse_shortcut_insert(self):
+        from hid_report import parse_shortcut, MOD_LEFT_CTRL
+        mod, sc = parse_shortcut("ctrl+insert")
+        self.assertEqual(mod, MOD_LEFT_CTRL)
+        self.assertEqual(sc, 0x49)
+
+
+class TestTextToHidReports(unittest.TestCase):
+    def test_char_to_hid_report_alphanumeric(self):
+        from hid_report import char_to_hid_report
+
+        # Lowercase 'h'
+        press, release = char_to_hid_report("h")
+        self.assertEqual(press[0], 0x00)
+        self.assertEqual(press[2], SCAN["h"])
+        self.assertEqual(release, b"\x00" * 8)
+
+        # Uppercase 'H' (adds Left Shift)
+        press, release = char_to_hid_report("H")
+        self.assertEqual(press[0], MOD_LEFT_SHIFT)
+        self.assertEqual(press[2], SCAN["h"])
+        self.assertEqual(release, b"\x00" * 8)
+
+        # Digit '5'
+        press, release = char_to_hid_report("5")
+        self.assertEqual(press[0], 0x00)
+        self.assertEqual(press[2], SCAN["5"])
+        self.assertEqual(release, b"\x00" * 8)
+
+    def test_char_to_hid_report_shifted_symbols(self):
+        from hid_report import char_to_hid_report
+
+        press, release = char_to_hid_report("!")
+        self.assertEqual(press[0], MOD_LEFT_SHIFT)
+        self.assertEqual(press[2], SCAN["1"])
+        self.assertEqual(release, b"\x00" * 8)
+
+    def test_char_to_hid_report_whitespace(self):
+        from hid_report import char_to_hid_report
+
+        press, _ = char_to_hid_report(" ")
+        self.assertEqual(press[2], SCAN["space"])
+
+        press, _ = char_to_hid_report("\n")
+        self.assertEqual(press[2], SCAN["enter"])
+
+        press, _ = char_to_hid_report("\t")
+        self.assertEqual(press[2], SCAN["tab"])
+
+    def test_char_to_hid_report_invalid(self):
+        from hid_report import char_to_hid_report
+
+        self.assertIsNone(char_to_hid_report(""))
+        self.assertIsNone(char_to_hid_report("ab"))
+        self.assertIsNone(char_to_hid_report("😀"))
+
+    def test_text_to_hid_reports(self):
+        from hid_report import text_to_hid_reports
+
+        pairs = text_to_hid_reports("Hi 1\n")
+        # 5 characters: 'H', 'i', ' ', '1', '\n'
+        self.assertEqual(len(pairs), 5)
+
+        # Check 'H'
+        press_h, rel_h = pairs[0]
+        self.assertEqual(press_h[0], MOD_LEFT_SHIFT)
+        self.assertEqual(press_h[2], SCAN["h"])
+        self.assertEqual(rel_h, b"\x00" * 8)
+
+        # Check 'i'
+        press_i, _ = pairs[1]
+        self.assertEqual(press_i[0], 0x00)
+        self.assertEqual(press_i[2], SCAN["i"])
+
+        # Check CRLF normalized
+        pairs_crlf = text_to_hid_reports("A\r\nB")
+        self.assertEqual(len(pairs_crlf), 3)  # 'A', '\n', 'B'
+
+
+
 if __name__ == "__main__":
     unittest.main()
 

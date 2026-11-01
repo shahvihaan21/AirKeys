@@ -516,6 +516,94 @@ def cmd_shortcut(args=None):
         return 1
 
 
+def get_clipboard_text() -> str | None:
+    """Read plain text from Windows clipboard using ctypes without external dependencies."""
+    if sys.platform != "win32":
+        return None
+    try:
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+        user32.GetClipboardData.restype = ctypes.c_void_p
+        user32.GetClipboardData.argtypes = [ctypes.c_uint]
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+        kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+
+        CF_UNICODETEXT = 13
+        if not user32.OpenClipboard(None):
+            return None
+        try:
+            h_glb = user32.GetClipboardData(CF_UNICODETEXT)
+            if not h_glb:
+                return None
+            p_data = kernel32.GlobalLock(h_glb)
+            if not p_data:
+                return None
+            try:
+                return ctypes.wstring_at(p_data)
+            finally:
+                kernel32.GlobalUnlock(h_glb)
+        finally:
+            user32.CloseClipboard()
+    except Exception:
+        return None
+
+
+def send_text_ipc(text: str) -> tuple[bool, str]:
+    """
+    Send text to running AirKeys service via IPC.
+    Returns (success, message).
+    """
+    pid = get_current_pid()
+    if pid is None:
+        return False, "AirKeys is not running. Turn it ON first with: python cli.py on"
+
+    if not text:
+        return False, "Cannot send empty text."
+
+    try:
+        import json
+        payload = json.dumps(text)
+        with open(CMD_FILE, "a", encoding="utf-8") as f:
+            f.write(f"text:{payload}\n")
+        preview = text[:30] + ("..." if len(text) > 30 else "")
+        return True, f"Sent text ({len(text)} chars: '{preview}') to AirKeys (PID: {pid})."
+    except Exception as e:
+        return False, f"Could not write to command queue: {e}"
+
+
+def cmd_type(args=None):
+    """Send / type text on the connected device (from argument or clipboard)."""
+    use_clipboard = getattr(args, "clipboard", False)
+    text_parts = getattr(args, "text", None)
+
+    if use_clipboard:
+        text = get_clipboard_text()
+        if not text:
+            print("\n  ❌ Clipboard is empty or does not contain text.\n")
+            return 1
+    elif text_parts:
+        if isinstance(text_parts, list):
+            text = " ".join(text_parts)
+        else:
+            text = str(text_parts)
+    else:
+        print("\n  AirKeys Text Typer:")
+        print("    python cli.py type \"Hello world!\"    (Send custom text)")
+        print("    python cli.py type --clipboard        (Send clipboard content)")
+        print()
+        return 0
+
+    success, msg = send_text_ipc(text)
+    if success:
+        print(f"\n  ✓ {msg}\n")
+        return 0
+    else:
+        print(f"\n  ❌ {msg}\n")
+        return 1
+
+
 # =====================================================================
 # Main Parser
 # =====================================================================
@@ -531,6 +619,8 @@ Examples:
   python cli.py switch              Toggle ON/OFF switch
   python cli.py shortcut ctrl+c     Send Ctrl+C shortcut to phone
   python cli.py shortcut ctrl+v     Send Ctrl+V shortcut to phone
+  python cli.py type "Hello phone"  Type text onto phone
+  python cli.py type --clipboard    Type clipboard text onto phone
   python cli.py status              View current status
   python cli.py logs                View recent log entries
   python cli.py check               Check Bluetooth adapter
@@ -571,6 +661,17 @@ Examples:
         "combo", nargs="?", default=None, help="Shortcut combination (e.g. ctrl+c, ctrl+v, copy, paste)"
     )
 
+    # type / send-text / paste-text
+    parser_type = subparsers.add_parser(
+        "type", aliases=["send-text", "paste-text"], help="Type/send text or clipboard content to connected device"
+    )
+    parser_type.add_argument(
+        "text", nargs="*", default=None, help="Text to type onto the connected device"
+    )
+    parser_type.add_argument(
+        "-c", "--clipboard", action="store_true", help="Send current clipboard contents"
+    )
+
     args = parser.parse_args()
 
     command = args.command
@@ -590,6 +691,8 @@ Examples:
         sys.exit(cmd_restart(args))
     elif command in ("shortcut", "send", "sc", "key"):
         sys.exit(cmd_shortcut(args))
+    elif command in ("type", "send-text", "paste-text"):
+        sys.exit(cmd_type(args))
     else:
         # Default with no arguments: show status and quick toggle option
         pid = get_current_pid()
@@ -605,6 +708,8 @@ Examples:
         print("    python cli.py on                <-- Turn ON")
         print("    python cli.py off               <-- Turn OFF")
         print("    python cli.py shortcut ctrl+c   <-- Send shortcut (Ctrl+C, Ctrl+V, etc.)")
+        print("    python cli.py type \"Hello\"      <-- Type text on phone")
+        print("    python cli.py type --clipboard  <-- Type clipboard text on phone")
         print("    python cli.py status            <-- View detailed status")
         print("    python cli.py logs              <-- View recent logs")
         print("    python cli.py check             <-- Check Bluetooth hardware")

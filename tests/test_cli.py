@@ -67,6 +67,48 @@ class TestCliHelpers(unittest.TestCase):
             args = unittest.mock.Mock(combo="invalid_key_combo_xyz")
             self.assertEqual(cli.cmd_shortcut(args), 1)
 
+    def test_cmd_type_when_service_not_running(self):
+        """Should fail cleanly when AirKeys is not running."""
+        with patch("cli.get_current_pid", return_value=None):
+            args = unittest.mock.Mock(text=["Hello"], clipboard=False)
+            self.assertEqual(cli.cmd_type(args), 1)
+
+    def test_cmd_type_writes_to_cmd_file_when_running(self):
+        """Should write json-encoded text command to CMD_FILE when service is running."""
+        mock_file = unittest.mock.mock_open()
+        with patch("cli.get_current_pid", return_value=12345), \
+             patch("builtins.open", mock_file):
+            args = unittest.mock.Mock(text=["Hello", "world"], clipboard=False)
+            self.assertEqual(cli.cmd_type(args), 0)
+        mock_file().write.assert_called_with('text:"Hello world"\n')
+
+    def test_cmd_type_with_clipboard(self):
+        """Should read from clipboard and write to CMD_FILE."""
+        mock_file = unittest.mock.mock_open()
+        with patch("cli.get_current_pid", return_value=12345), \
+             patch("cli.get_clipboard_text", return_value="pasted clipboard text"), \
+             patch("builtins.open", mock_file):
+            args = unittest.mock.Mock(text=None, clipboard=True)
+            self.assertEqual(cli.cmd_type(args), 0)
+        mock_file().write.assert_called_with('text:"pasted clipboard text"\n')
+
+    def test_cmd_type_clipboard_empty(self):
+        """Should fail cleanly when clipboard is empty."""
+        with patch("cli.get_current_pid", return_value=12345), \
+             patch("cli.get_clipboard_text", return_value=None):
+            args = unittest.mock.Mock(text=None, clipboard=True)
+            self.assertEqual(cli.cmd_type(args), 1)
+
+    def test_cmd_type_no_args_shows_help(self):
+        """Calling without text or clipboard should show help and return 0."""
+        args = unittest.mock.Mock(text=None, clipboard=False)
+        self.assertEqual(cli.cmd_type(args), 0)
+
+    def test_get_clipboard_text_error_handling(self):
+        """When ctypes throws an exception, get_clipboard_text should return None cleanly."""
+        with patch("ctypes.windll.user32.OpenClipboard", side_effect=Exception("Lock error")):
+            self.assertIsNone(cli.get_clipboard_text())
+
 
 if __name__ == "__main__":
     unittest.main()

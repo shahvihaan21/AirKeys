@@ -28,7 +28,7 @@ from winrt.windows.devices.bluetooth.genericattributeprofile import (
 )
 from winrt.windows.storage.streams import DataWriter
 
-from hid_report import KEYBOARD_REPORT_MAP, build_shortcut_reports
+from hid_report import KEYBOARD_REPORT_MAP, build_shortcut_reports, text_to_hid_reports
 
 log = logging.getLogger("ble_hid")
 
@@ -146,6 +146,28 @@ class BleHidService:
             await asyncio.sleep(hold_duration)
             await self.send_report(release_report)
         return sent
+
+    async def send_text(self, text: str, key_delay: float = 0.015) -> int:
+        """
+        Send text keystroke by keystroke over BLE HID.
+        Returns the number of successfully sent characters.
+        """
+        pairs = text_to_hid_reports(text)
+        if not pairs:
+            return 0
+        count = 0
+        for press, release in pairs:
+            sent = await self.send_report(press)
+            if not sent:
+                break
+            if key_delay > 0:
+                await asyncio.sleep(key_delay)
+            await self.send_report(release)
+            if key_delay > 0:
+                await asyncio.sleep(key_delay)
+            count += 1
+        return count
+
 
 
     @property
