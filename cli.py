@@ -35,12 +35,25 @@ ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 MAIN_PY = os.path.join(ROOT_DIR, "src", "main.py")
 PID_FILE = os.path.join(ROOT_DIR, ".airkeys.pid")
 LEGACY_PID_FILE = os.path.join(ROOT_DIR, ".laptopkey.pid")
+STATE_FILE = os.path.join(ROOT_DIR, ".airkeys.state")
 STOP_FILE = os.path.join(ROOT_DIR, ".airkeys.stop")
 LEGACY_STOP_FILE = os.path.join(ROOT_DIR, ".laptopkey.stop")
 CMD_FILE = os.path.join(ROOT_DIR, ".airkeys.cmd")
 LEGACY_CMD_FILE = os.path.join(ROOT_DIR, ".laptopkey.cmd")
 LOG_FILE = os.path.join(ROOT_DIR, "airkeys.log")
 LEGACY_LOG_FILE = os.path.join(ROOT_DIR, "laptopkey.log")
+
+
+def get_runtime_state() -> dict | None:
+    """Read live .airkeys.state if present and valid."""
+    if os.path.exists(STATE_FILE):
+        try:
+            import json
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
 
 
 def environment_problems() -> list[str]:
@@ -76,10 +89,17 @@ def print_environment_problems(problems: list[str]) -> None:
 # Windows Process Helpers (using ctypes, no external psutil required)
 # =====================================================================
 
-def is_pid_running(pid: int) -> bool:
-    """Check if process with given PID exists and is currently active."""
+def is_pid_airkeys(pid: int, expected_create_time: int | None = None) -> bool:
+    """
+    Verify process exists, is STILL_ACTIVE, is a Python interpreter,
+    and matches expected creation time to prevent terminating unrelated recycled PIDs.
+    """
     if pid <= 0:
         return False
+
+    if sys.platform != "win32":
+        return True
+
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
     SYNCHRONIZE = 0x00100000
     handle = ctypes.windll.kernel32.OpenProcess(
@@ -87,43 +107,122 @@ def is_pid_running(pid: int) -> bool:
     )
     if not handle:
         return False
-    exit_code = wintypes.DWORD()
-    ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
-    ctypes.windll.kernel32.CloseHandle(handle)
-    return exit_code.value == 259  # 259 = STILL_ACTIVE
+
+    try:
+        # 1. Verify process exit code is STILL_ACTIVE (259)
+        exit_code = wintypes.DWORD()
+        if not ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return False
+        if exit_code.value != 259:
+            return False
+
+        # 2. Verify process executable name (must be python.exe or pythonw.exe)
+        buf = ctypes.create_unicode_buffer(1024)
+        size = wintypes.DWORD(1024)
+        if ctypes.windll.kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+            exe_path = buf.value.lower()
+            exe_name = os.path.basename(exe_path)
+            if not (exe_name.startswith("python") and exe_name.endswith(".exe")):
+                return False
+
+        # 3. If expected_create_time is provided, verify creation time
+        if expected_create_time is not None:
+            ft_c = wintypes.FILETIME()
+            ft_e = wintypes.FILETIME()
+            ft_k = wintypes.FILETIME()
+            ft_u = wintypes.FILETIME()
+            if ctypes.windll.kernel32.GetProcessTimes(
+                handle, ctypes.byref(ft_c), ctypes.byref(ft_e), ctypes.byref(ft_k), ctypes.byref(ft_u)
+            ):
+                actual_create_time = (ft_c.dwHighDateTime << 32) | ft_c.dwLowDateTime
+                if abs(actual_create_time - expected_create_time) > 10000:
+                    return False
+
+        return True
+    finally:
+        ctypes.windll.kernel32.CloseHandle(handle)
+
+
+def is_pid_running(pid: int) -> bool:
+    """Check if process with given PID exists, is active, and is an AirKeys Python process."""
+    return is_pid_airkeys(pid)
 
 
 def get_current_pid() -> int | None:
-    """Read PID from PID_FILE (or fallback LEGACY_PID_FILE) if process is alive."""
-    for path in (PID_FILE, LEGACY_PID_FILE):
-        if not os.path.exists(path):
-            continue
+    """Read PID from PID_FILE (or fallback LEGACY_PID_FILE) if process is verified alive."""
+    # Check primary PID_FILE
+    if os.path.exists(PID_FILE):
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(PID_FILE, "r", encoding="utf-8") as f:
                 content = f.read().strip()
-                if not content:
-                    continue
-                pid = int(content)
-                if is_pid_running(pid):
+            if content:
+                pid = None
+                expected_create_time = None
+                if content.startswith("{"):
+                    import json
+                    try:
+                        data = json.loads(content)
+                        pid = int(data.get("pid", 0))
+                        expected_create_time = data.get("create_time")
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        pid = int(content)
+                    except ValueError:
+                        pass
+
+                if pid and is_pid_airkeys(pid, expected_create_time):
                     return pid
                 else:
-                    # Stale PID file
+                    # Stale or recycled PID file
                     try:
-                        os.remove(path)
+                        os.remove(PID_FILE)
                     except Exception:
                         pass
         except Exception:
             pass
+
+    # Fallback to LEGACY_PID_FILE
+    if os.path.exists(LEGACY_PID_FILE):
+        try:
+            with open(LEGACY_PID_FILE, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+            if content:
+                try:
+                    pid = int(content)
+                    if is_pid_airkeys(pid):
+                        return pid
+                except ValueError:
+                    pass
+                try:
+                    os.remove(LEGACY_PID_FILE)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     return None
 
 
-def terminate_pid(pid: int):
-    """Force terminate process if it fails to exit gracefully."""
+def terminate_pid(pid: int) -> bool:
+    """
+    Safely terminate process ONLY after verifying it is the AirKeys Python process.
+    Refuses to terminate unrelated processes if Windows recycled the PID.
+    """
+    if not is_pid_airkeys(pid):
+        print(f"  ⚠️ Refusing to terminate PID {pid}: verified not to be AirKeys process (possible PID reuse).")
+        return False
+
     PROCESS_TERMINATE = 0x0001
     handle = ctypes.windll.kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
     if handle:
-        ctypes.windll.kernel32.TerminateProcess(handle, 1)
-        ctypes.windll.kernel32.CloseHandle(handle)
+        try:
+            ctypes.windll.kernel32.TerminateProcess(handle, 1)
+            return True
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    return False
 
 
 # =====================================================================
@@ -139,16 +238,18 @@ def cmd_on(args=None):
 
     pid = get_current_pid()
     if pid is not None:
+        state = get_runtime_state()
+        conn_str = " (Connected to Phone)" if (state and state.get("connected")) else " (Waiting for connection)"
         print()
         print("  🟢 AirKeys is ALREADY RUNNING!")
         print(f"     PID:      {pid}")
-        print("     Status:   Broadcasting BLE Keyboard (AirKeys)")
+        print(f"     Status:   Broadcasting BLE Keyboard (AirKeys){conn_str}")
         print("     To turn OFF: python cli.py off   (or run scripts/switch.bat)")
         print()
         return 0
 
-    # Clean up any leftover stop files
-    for s_path in (STOP_FILE, LEGACY_STOP_FILE):
+    # Clean up any leftover stop files or stale runtime state
+    for s_path in (STOP_FILE, LEGACY_STOP_FILE, STATE_FILE):
         if os.path.exists(s_path):
             try:
                 os.remove(s_path)
@@ -196,9 +297,9 @@ def cmd_on(args=None):
         print(f"  ❌ Error starting process: {e}")
         return 1
 
-    # Wait up to 3 seconds for PID file confirmation
+    # Wait up to 4 seconds for PID file confirmation
     confirmed_pid = None
-    for _ in range(15):
+    for _ in range(20):
         time.sleep(0.2)
         confirmed_pid = get_current_pid()
         if confirmed_pid is not None:
@@ -223,13 +324,29 @@ def cmd_on(args=None):
             print(f"  ❌ AirKeys failed to start. (Exit code: {proc.returncode})")
             print(f"     Check logs with: python cli.py logs")
         else:
-            print(f"  ⚠️ Process started (PID: {proc.pid}), waiting for initialization...")
+            # Terminate orphaned startup process to prevent zombie processes!
+            print("  ❌ AirKeys startup timed out. Terminating orphaned background process...")
+            try:
+                proc.terminate()
+                proc.wait(timeout=2.0)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            for path in (PID_FILE, LEGACY_PID_FILE, STATE_FILE):
+                if os.path.exists(path):
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
+            print("     Check logs with: python cli.py logs")
         print()
         return 1
 
 
 def cmd_off(args=None):
-    """Turn OFF AirKeys cleanly."""
+    """Turn OFF AirKeys cleanly and ensure all keys are released."""
     pid = get_current_pid()
     if pid is None:
         print()
@@ -240,7 +357,7 @@ def cmd_off(args=None):
     print()
     print(f"  ⏳ Sending graceful stop signal to AirKeys (PID: {pid})...")
     
-    # Write stop sentinel files
+    # Write stop sentinel files and queue stop command via IPC
     for s_path in (STOP_FILE, LEGACY_STOP_FILE):
         try:
             with open(s_path, "w", encoding="utf-8") as f:
@@ -248,21 +365,21 @@ def cmd_off(args=None):
         except Exception as e:
             print(f"  ⚠️ Could not write stop sentinel ({s_path}): {e}")
 
-    # Wait up to 3.5 seconds for graceful shutdown
+    # Wait up to 5 seconds for graceful shutdown (giving time for flush of release reports)
     stopped = False
-    for _ in range(18):
+    for _ in range(25):
         time.sleep(0.2)
         if not is_pid_running(pid):
             stopped = True
             break
 
     if not stopped:
-        print(f"  ⚠️ Process did not exit within timeout. Terminating PID {pid}...")
+        print(f"  ⚠️ Process did not exit within timeout. Verifying identity before termination...")
         terminate_pid(pid)
         time.sleep(0.3)
 
-    # Clean up PID and STOP files
-    for path in (PID_FILE, LEGACY_PID_FILE, STOP_FILE, LEGACY_STOP_FILE):
+    # Clean up PID, state, and STOP files
+    for path in (PID_FILE, LEGACY_PID_FILE, STATE_FILE, STOP_FILE, LEGACY_STOP_FILE):
         if os.path.exists(path):
             try:
                 os.remove(path)
@@ -351,22 +468,45 @@ def _interactive_switch():
 
 
 def cmd_status(args=None):
-    """Display current system and service status."""
+    """Display verified system, connection, and delivery status."""
     pid = get_current_pid()
     machine_name = platform.node()
+    state = get_runtime_state() if pid is not None else None
+
     print()
     print("  ================================================================")
     print("                        AIRKEYS STATUS                            ")
     print("  ================================================================")
     if pid is not None:
-        print(f"  Service State:   🟢 RUNNING (PID: {pid})")
-        print("  Bluetooth Role:  BLE Peripheral Keyboard (HOGP)")
-        print(f"  Advertised Name: AirKeys / {machine_name}")
-        print("  Typing Control:  [F12] toggles typing forwarding to phone")
-        print("  Stop Switch:     python cli.py off  (or run scripts/switch.bat)")
+        print(f"  Service State:    🟢 RUNNING (PID: {pid})")
+        print("  Bluetooth Role:   BLE Peripheral Keyboard (HOGP)")
+        print(f"  Advertised Name:  AirKeys / {machine_name}")
+
+        # Accurate Connection Status
+        if state and state.get("connected"):
+            sub_id = state.get("subscriber_id")
+            sub_text = f"Host: {sub_id}" if sub_id else "Verified connection"
+            print(f"  Connection State: 🟢 CONNECTED & SUBSCRIBED ({sub_text})")
+        else:
+            print("  Connection State: 🟡 ADVERTISING (Broadcasting — Waiting for device to pair/connect)")
+
+        # Typing Forwarding Status
+        if state and not state.get("forwarding_enabled", True):
+            print("  Typing Control:   ⏸ MUTED (Press [F12] to resume forwarding to phone)")
+        else:
+            print("  Typing Control:   🟢 FORWARDING ACTIVE (Press [F12] to mute)")
+
+        # Notification Delivery Metrics
+        if state:
+            sent = state.get("reports_sent", 0)
+            failed = state.get("reports_failed", 0)
+            print(f"  Keystroke Stats:  Reports Delivered: {sent} | Delivery Failures: {failed}")
+
+        print("  Stop Switch:      python cli.py off  (or run scripts/switch.bat)")
     else:
-        print("  Service State:   🔴 STOPPED (Not running)")
-        print("  Start Switch:    python cli.py on   (or run scripts/switch.bat)")
+        print("  Service State:    🔴 STOPPED (Not running)")
+        print("  Connection State: 🔴 DISCONNECTED")
+        print("  Start Switch:     python cli.py on   (or run scripts/switch.bat)")
 
     # Log tail (check current log file, or fallback to legacy)
     active_log = LOG_FILE if os.path.exists(LOG_FILE) else (LEGACY_LOG_FILE if os.path.exists(LEGACY_LOG_FILE) else None)
@@ -442,6 +582,11 @@ def cmd_check(args=None):
             res = await GattServiceProvider.create_async(hid_uuid)
             gatt_ok = res.service_provider is not None
             print(f"  {'✓' if gatt_ok else '❌'} GattServiceProvider HOGP: {'Supported' if gatt_ok else 'Failed'}")
+            if gatt_ok:
+                try:
+                    res.service_provider.stop_advertising()
+                except Exception:
+                    pass
             
             print("  " + "-" * 60)
             if peri and gatt_ok:

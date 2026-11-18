@@ -71,12 +71,30 @@ class BleHidService:
         self._on_subscriber_change = on_subscriber_change
         self._is_advertising = False
         self._has_subscribers = False
+        self._current_subscriber_id: Optional[str] = None
+        self._sent_reports: int = 0
+        self._failed_reports: int = 0
         self._send_lock: Optional[asyncio.Lock] = None
 
     @staticmethod
     def _secure_protection_level():
         """Require an authenticated, encrypted LE link for HID interaction."""
         return GattProtectionLevel.ENCRYPTION_AND_AUTHENTICATION_REQUIRED
+
+    @property
+    def sent_reports(self) -> int:
+        """Total successfully delivered HID reports."""
+        return self._sent_reports
+
+    @property
+    def failed_reports(self) -> int:
+        """Total failed HID report deliveries."""
+        return self._failed_reports
+
+    @property
+    def current_subscriber_id(self) -> Optional[str]:
+        """Device ID of the currently subscribed Bluetooth host."""
+        return self._current_subscriber_id
 
     # ---- Public API ----
 
@@ -92,27 +110,64 @@ class BleHidService:
             log.warning("Advertisement offload not supported; advertising may not work.")
         log.info("Adapter OK — peripheral role supported.")
 
-        await self._create_hid_service()
-        await self._create_battery_service()
-        self._start_advertising()
-        log.info("BLE HID keyboard is now advertising. Pair from your phone.")
+        try:
+            await self._create_hid_service()
+            await self._create_battery_service()
+            self._start_advertising()
+            log.info("BLE HID keyboard is now advertising. Pair from your phone.")
+        except Exception as e:
+            log.error(f"GATT server initialization failed: {e}. Performing startup cleanup...")
+            await self.stop()
+            raise
 
     async def stop(self) -> None:
-        """Stop advertising and tear down services."""
+        """Stop advertising, release held keys, and tear down services cleanly."""
+        try:
+            await self.ensure_keys_released(retries=2, delay=0.02)
+        except Exception as e:
+            log.debug(f"Could not send release during stop: {e}")
+
         if self._hid_provider and self._is_advertising:
-            self._hid_provider.stop_advertising()
+            try:
+                self._hid_provider.stop_advertising()
+            except Exception as e:
+                log.debug(f"Error stopping HID advertising: {e}")
         if self._battery_provider:
             try:
                 self._battery_provider.stop_advertising()
             except Exception:
                 pass
         self._is_advertising = False
-        log.info("Stopped advertising.")
+        self._has_subscribers = False
+        self._current_subscriber_id = None
+        self._hid_provider = None
+        self._battery_provider = None
+        self._input_report_char = None
+        log.info("Stopped advertising and cleaned up GATT services.")
+
+    async def ensure_keys_released(self, retries: int = 3, delay: float = 0.03) -> bool:
+        """
+        Actively flush an all-zero HID release report with retries to prevent stuck keys on disconnect.
+        """
+        if not self.has_subscribers or self._input_report_char is None:
+            return False
+        release_report = b"\x00" * 8
+        sent_any = False
+        for attempt in range(retries):
+            try:
+                sent = await self.send_report(release_report)
+                if sent:
+                    sent_any = True
+                if attempt < retries - 1:
+                    await asyncio.sleep(delay)
+            except Exception as e:
+                log.debug(f"Release retry {attempt + 1} failed: {e}")
+        return sent_any
 
     async def send_report(self, report: bytes) -> bool:
         """
         Send an 8-byte keyboard HID report to connected host(s).
-        Returns True if at least one notification was sent.
+        Returns True if at least one notification was successfully sent and acknowledged.
         """
         if len(report) != 8:
             raise ValueError("HID keyboard reports must be exactly 8 bytes.")
@@ -126,11 +181,55 @@ class BleHidService:
                 subscribers = self._input_report_char.subscribed_clients
                 if subscribers is None or subscribers.size == 0:
                     return False
-                await self._input_report_char.notify_value_async(_write_bytes(report))
+
+                # Verify active sessions if accessible
+                active_count = 0
+                for i in range(subscribers.size):
+                    client = (
+                        subscribers.get_at(i)
+                        if hasattr(subscribers, "get_at")
+                        else (subscribers[i] if hasattr(subscribers, "__getitem__") else None)
+                    )
+                    if client is not None:
+                        session = getattr(client, "session", None)
+                        if session is not None:
+                            status = getattr(session, "session_status", None)
+                            if status is not None and getattr(status, "value", status) != 0:
+                                continue
+                    active_count += 1
+
+                if active_count == 0 and subscribers.size > 0:
+                    log.warning("No active GATT sessions found among subscribers.")
+                    self._failed_reports += 1
+                    return False
+
+                results = await self._input_report_char.notify_value_async(_write_bytes(report))
+
+                # Check results from WinRT if present
+                if results is not None and hasattr(results, "__iter__"):
+                    success = False
+                    for res in results:
+                        status = getattr(res, "status", None)
+                        status_val = getattr(status, "value", status)
+                        if status_val == 0:
+                            success = True
+                        elif status_val == 3:  # ACCESS_DENIED
+                            log.error("Bluetooth notification ACCESS_DENIED: host is not paired or authenticated.")
+                        elif status_val == 1:  # UNREACHABLE
+                            log.warning("Bluetooth notification UNREACHABLE: host disconnected.")
+                        elif status_val == 2:  # PROTOCOL_ERROR
+                            log.error("Bluetooth notification PROTOCOL_ERROR.")
+                    if not success and (
+                        (hasattr(results, "__len__") and len(results) > 0)
+                        or (hasattr(results, "size") and results.size > 0)
+                    ):
+                        self._failed_reports += 1
+                        return False
+
+                self._sent_reports += 1
                 return True
             except Exception as e:
-                # A disconnected host can fail between the subscription check
-                # and notification.  Return a result that callers must handle.
+                self._failed_reports += 1
                 log.error("Failed to send HID report: %s", e)
                 return False
 
@@ -243,9 +342,10 @@ class BleHidService:
             GattCharacteristicProperties.NOTIFY
         )
         # Windows enforces this protection level for access to the local
-        # characteristic/CCCD.  Reports are never notified until a client has
-        # subscribed, so an unauthenticated client cannot receive them.
+        # characteristic/CCCD. Reports are never notified until a client has
+        # subscribed with authentication & encryption.
         params.read_protection_level = self._secure_protection_level()
+        params.write_protection_level = self._secure_protection_level()
         r = await service.create_characteristic_async(UUID_REPORT, params)
         if r.characteristic is None:
             raise RuntimeError("Failed to create Input Report characteristic.")
@@ -254,6 +354,7 @@ class BleHidService:
         # Add Report Reference descriptor (Report ID=0, Type=Input=1)
         desc_params = GattLocalDescriptorParameters()
         desc_params.read_protection_level = self._secure_protection_level()
+        desc_params.write_protection_level = self._secure_protection_level()
         desc_params.static_value = _write_bytes(bytes([0x00, 0x01]))
         dr = await self._input_report_char.create_descriptor_async(
             UUID_REPORT_REFERENCE, desc_params
@@ -266,11 +367,32 @@ class BleHidService:
         # Subscribe to subscriber changes
         def _on_subscribers_changed(sender, args):
             has = self.has_subscribers
-            if has != self._has_subscribers:
+            subscriber_id = None
+            if has:
+                try:
+                    subs = sender.subscribed_clients if sender else None
+                    if subs and getattr(subs, "size", 0) > 0:
+                        client = (
+                            subs.get_at(0)
+                            if hasattr(subs, "get_at")
+                            else (subs[0] if hasattr(subs, "__getitem__") else None)
+                        )
+                        session = getattr(client, "session", None)
+                        if session and hasattr(session, "device_id"):
+                            dev = session.device_id
+                            subscriber_id = str(getattr(dev, "id", dev))
+                except Exception:
+                    pass
+            if has != self._has_subscribers or subscriber_id != self._current_subscriber_id:
                 self._has_subscribers = has
-                log.info(f"Subscriber status changed: {'connected' if has else 'disconnected'}")
+                self._current_subscriber_id = subscriber_id
+                status_str = f"connected ({subscriber_id})" if (has and subscriber_id) else ("connected" if has else "disconnected")
+                log.info(f"Subscriber status changed: {status_str}")
                 if self._on_subscriber_change:
-                    self._on_subscriber_change(has)
+                    try:
+                        self._on_subscriber_change(has, subscriber_id)
+                    except TypeError:
+                        self._on_subscriber_change(has)
 
         self._input_report_char.add_subscribed_clients_changed(_on_subscribers_changed)
         log.info("HID Service created with all characteristics.")

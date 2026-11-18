@@ -25,9 +25,13 @@ class _Characteristic:
         self.notifications = []
         self.fail_notify = False
         self.handler = None
+        self.descriptors = {}
+        self.mock_results = None
 
     async def create_descriptor_async(self, uuid, params):
-        return types.SimpleNamespace(descriptor=object())
+        desc = types.SimpleNamespace(descriptor=object(), params=params)
+        self.descriptors[uuid] = desc
+        return desc
 
     def add_subscribed_clients_changed(self, handler):
         self.handler = handler
@@ -36,6 +40,7 @@ class _Characteristic:
         if self.fail_notify:
             raise RuntimeError("link lost")
         self.notifications.append(buffer)
+        return self.mock_results
 
 
 class _Service:
@@ -64,6 +69,12 @@ class _GattServiceProvider:
     @classmethod
     async def create_async(cls, uuid):
         return types.SimpleNamespace(service_provider=_Provider(), error=None)
+
+
+class _BluetoothAdapter:
+    @classmethod
+    async def get_default_async(cls):
+        return types.SimpleNamespace(is_peripheral_role_supported=True, is_advertisement_offload_supported=True)
 
 
 class _Parameters:
@@ -95,7 +106,7 @@ def _install_winrt_stubs():
     gatt.GattCharacteristicProperties = types.SimpleNamespace(READ=1, NOTIFY=2, WRITE_WITHOUT_RESPONSE=4)
     gatt.GattProtectionLevel = _Protection
     bluetooth = packages["winrt.windows.devices.bluetooth"]
-    bluetooth.BluetoothAdapter = object
+    bluetooth.BluetoothAdapter = _BluetoothAdapter
     bluetooth.BluetoothError = RuntimeError
     packages["winrt.windows.storage.streams"].DataWriter = _Writer
     sys.modules.update(packages)
@@ -177,6 +188,63 @@ class TestBleHidService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(press_i[0], 0x00)
         self.assertEqual(press_i[2], 0x0C)  # 'i' scancode
         self.assertEqual(rel_i, b"\x00" * 8)
+
+    async def test_ensure_keys_released_flushes_zero_reports(self):
+        service = self.module.BleHidService()
+        await service._create_hid_service()
+        characteristic = service._input_report_char
+        characteristic.notifications.clear()
+
+        result = await service.ensure_keys_released(retries=2, delay=0.001)
+        self.assertTrue(result)
+        self.assertEqual(len(characteristic.notifications), 2)
+        for n in characteristic.notifications:
+            self.assertEqual(n, b"\x00" * 8)
+
+    async def test_delivery_statistics_and_access_denied(self):
+        service = self.module.BleHidService()
+        await service._create_hid_service()
+        characteristic = service._input_report_char
+
+        self.assertEqual(service.sent_reports, 0)
+        self.assertEqual(service.failed_reports, 0)
+
+        # Successful send
+        self.assertTrue(await service.send_report(b"\x00" * 8))
+        self.assertEqual(service.sent_reports, 1)
+        self.assertEqual(service.failed_reports, 0)
+
+        # ACCESS_DENIED from host (value 3 in GattCommunicationStatus)
+        characteristic.mock_results = [types.SimpleNamespace(status=types.SimpleNamespace(value=3))]
+        self.assertFalse(await service.send_report(b"\x00" * 8))
+        self.assertEqual(service.sent_reports, 1)
+        self.assertEqual(service.failed_reports, 1)
+
+    async def test_descriptor_requires_authenticated_encryption(self):
+        service = self.module.BleHidService()
+        await service._create_hid_service()
+        characteristic = service._input_report_char
+        desc = characteristic.descriptors[self.module.UUID_REPORT_REFERENCE]
+        self.assertEqual(desc.params.read_protection_level, _Protection.ENCRYPTION_AND_AUTHENTICATION_REQUIRED)
+        self.assertEqual(desc.params.write_protection_level, _Protection.ENCRYPTION_AND_AUTHENTICATION_REQUIRED)
+
+    async def test_startup_failure_cleans_up_providers(self):
+        service = self.module.BleHidService()
+        adapter_mock = types.SimpleNamespace(
+            is_peripheral_role_supported=True,
+            is_advertisement_offload_supported=True,
+        )
+        self.module.BluetoothAdapter.get_default_async = unittest.mock.AsyncMock(return_value=adapter_mock)
+        service._create_battery_service = unittest.mock.AsyncMock(side_effect=RuntimeError("Battery service crash"))
+
+        with self.assertRaises(RuntimeError):
+            await service.start()
+
+        # Both providers must be cleaned up and set to None
+        self.assertIsNone(service._hid_provider)
+        self.assertIsNone(service._battery_provider)
+        self.assertFalse(service._is_advertising)
+
 
 
 

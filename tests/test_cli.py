@@ -109,6 +109,62 @@ class TestCliHelpers(unittest.TestCase):
         with patch("ctypes.windll.user32.OpenClipboard", side_effect=Exception("Lock error")):
             self.assertIsNone(cli.get_clipboard_text())
 
+    def test_is_pid_airkeys_non_python_process(self):
+        """If a recycled PID belongs to a non-python executable, is_pid_airkeys should return False."""
+        with patch("ctypes.windll.kernel32.OpenProcess", return_value=123), \
+             patch("ctypes.windll.kernel32.GetExitCodeProcess", side_effect=lambda h, ref: setattr(ref._obj, 'value', 259) or True), \
+             patch("ctypes.windll.kernel32.QueryFullProcessImageNameW", side_effect=lambda h, fl, buf, sz: setattr(buf, 'value', 'C:\\Windows\\System32\\svchost.exe') or True), \
+             patch("ctypes.windll.kernel32.CloseHandle"):
+            self.assertFalse(cli.is_pid_airkeys(1234))
+
+    def test_terminate_pid_refuses_recycled_unrelated_pid(self):
+        """terminate_pid must refuse to kill a process that fails is_pid_airkeys verification."""
+        with patch("cli.is_pid_airkeys", return_value=False), \
+             patch("ctypes.windll.kernel32.OpenProcess") as mock_open:
+            result = cli.terminate_pid(9999)
+            self.assertFalse(result)
+            mock_open.assert_not_called()
+
+    def test_get_current_pid_json_metadata(self):
+        """get_current_pid should parse JSON metadata and verify process."""
+        current_pid = os.getpid()
+        json_data = f'{{"pid": {current_pid}, "create_time": 123456789, "executable": "python.exe"}}'
+        with patch("os.path.exists", side_effect=lambda p: p == cli.PID_FILE), \
+             patch("builtins.open", unittest.mock.mock_open(read_data=json_data)), \
+             patch("cli.is_pid_airkeys", return_value=True):
+            self.assertEqual(cli.get_current_pid(), current_pid)
+
+    def test_cmd_status_reflects_connection_state(self):
+        """cmd_status should report CONNECTED when live state indicates a subscribed host."""
+        with patch("cli.get_current_pid", return_value=12345), \
+             patch("cli.get_runtime_state", return_value={
+                 "connected": True,
+                 "subscriber_id": "Device-Phone-123",
+                 "forwarding_enabled": True,
+                 "reports_sent": 50,
+                 "reports_failed": 0
+             }), \
+             patch("builtins.print") as mock_print:
+            cli.cmd_status()
+            printed = " ".join(call.args[0] for call in mock_print.call_args_list if call.args)
+            self.assertIn("CONNECTED & SUBSCRIBED", printed)
+            self.assertIn("Device-Phone-123", printed)
+            self.assertIn("Reports Delivered: 50", printed)
+
+    def test_cmd_status_reflects_advertising_when_no_subscriber(self):
+        """cmd_status should report ADVERTISING when AirKeys is running but no phone is connected."""
+        with patch("cli.get_current_pid", return_value=12345), \
+             patch("cli.get_runtime_state", return_value={
+                 "connected": False,
+                 "forwarding_enabled": True,
+                 "reports_sent": 0,
+                 "reports_failed": 0
+             }), \
+             patch("builtins.print") as mock_print:
+            cli.cmd_status()
+            printed = " ".join(call.args[0] for call in mock_print.call_args_list if call.args)
+            self.assertIn("ADVERTISING", printed)
+
 
 if __name__ == "__main__":
     unittest.main()

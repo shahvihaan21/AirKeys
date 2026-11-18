@@ -18,6 +18,7 @@ import os
 import signal
 import sys
 import threading
+import time
 
 # Ensure Windows console handles UTF-8 / emojis gracefully
 if sys.platform == "win32":
@@ -49,6 +50,7 @@ from ble_hid_service import BleHidService
 # ---- Configuration ----
 PID_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".airkeys.pid"))
 LEGACY_PID_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".laptopkey.pid"))
+STATE_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".airkeys.state"))
 STOP_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".airkeys.stop"))
 LEGACY_STOP_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".laptopkey.stop"))
 CMD_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".airkeys.cmd"))
@@ -79,6 +81,84 @@ _exit_event = threading.Event()
 _is_forwarding_enabled = True  # Can be toggled on/off with F12
 _report_lock = threading.RLock()
 _pending_sends = set()
+_instance_mutex_handle = None
+
+
+def _get_process_create_time(pid: int) -> int:
+    """Return 64-bit creation timestamp for the process or fallback to time in ms."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
+            if h:
+                ft_c = wintypes.FILETIME()
+                ft_e = wintypes.FILETIME()
+                ft_k = wintypes.FILETIME()
+                ft_u = wintypes.FILETIME()
+                res = ctypes.windll.kernel32.GetProcessTimes(
+                    h, ctypes.byref(ft_c), ctypes.byref(ft_e), ctypes.byref(ft_k), ctypes.byref(ft_u)
+                )
+                ctypes.windll.kernel32.CloseHandle(h)
+                if res:
+                    return (ft_c.dwHighDateTime << 32) | ft_c.dwLowDateTime
+        except Exception:
+            pass
+    return int(time.time() * 1000)
+
+
+def _acquire_instance_mutex() -> bool:
+    """Acquire named Windows mutex to prevent multiple conflicting AirKeys processes."""
+    global _instance_mutex_handle
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ERROR_ALREADY_EXISTS = 183
+            _instance_mutex_handle = ctypes.windll.kernel32.CreateMutexW(
+                None, True, "Local\\AirKeys_Running_Instance_Mutex"
+            )
+            if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+                log.error("Another AirKeys instance is already running (Mutex held).")
+                if _instance_mutex_handle:
+                    ctypes.windll.kernel32.CloseHandle(_instance_mutex_handle)
+                    _instance_mutex_handle = None
+                return False
+        except Exception as e:
+            log.warning(f"Could not create instance mutex: {e}")
+    return True
+
+
+def _release_instance_mutex():
+    """Release named Windows mutex on clean exit."""
+    global _instance_mutex_handle
+    if _instance_mutex_handle and sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.kernel32.CloseHandle(_instance_mutex_handle)
+        except Exception:
+            pass
+        _instance_mutex_handle = None
+
+
+def _write_state(status: str = "advertising", connected: bool = False, subscriber_id: str | None = None):
+    """Write live runtime status for accurate CLI inspection."""
+    state = {
+        "pid": os.getpid(),
+        "status": status,
+        "connected": connected,
+        "subscriber_id": subscriber_id or (getattr(_ble_service, "current_subscriber_id", None) if _ble_service else None),
+        "forwarding_enabled": _is_forwarding_enabled,
+        "reports_sent": getattr(_ble_service, "sent_reports", 0) if _ble_service else 0,
+        "reports_failed": getattr(_ble_service, "failed_reports", 0) if _ble_service else 0,
+        "updated_at": time.time(),
+    }
+    try:
+        temp_file = STATE_FILE + ".tmp"
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+        os.replace(temp_file, STATE_FILE)
+    except Exception as e:
+        log.debug(f"Could not update state file: {e}")
 
 
 def _schedule_send(report: bytes):
@@ -86,6 +166,12 @@ def _schedule_send(report: bytes):
     if _loop is None or _ble_service is None or _loop.is_closed():
         log.warning("Dropped HID report because the BLE event loop is unavailable.")
         return
+
+    if not _ble_service.has_subscribers:
+        log.info("Keystroke dropped: no Bluetooth host currently connected/subscribed.")
+        _write_state(status="advertising", connected=False)
+        return
+
     future = asyncio.run_coroutine_threadsafe(_ble_service.send_report(report), _loop)
     _pending_sends.add(future)
 
@@ -93,14 +179,24 @@ def _schedule_send(report: bytes):
         _pending_sends.discard(done)
         try:
             sent = done.result()
-            if not sent and _ble_service and _ble_service.has_subscribers:
+            if not sent:
                 log.warning("HID report was not delivered; clearing pressed-key state.")
                 with _report_lock:
                     _report_builder.release_all()
+            _write_state(
+                status="connected" if _ble_service.has_subscribers else "advertising",
+                connected=_ble_service.has_subscribers,
+                subscriber_id=_ble_service.current_subscriber_id,
+            )
         except Exception:
             log.exception("HID report task failed.")
             with _report_lock:
                 _report_builder.release_all()
+            _write_state(
+                status="connected" if _ble_service.has_subscribers else "advertising",
+                connected=_ble_service.has_subscribers,
+                subscriber_id=_ble_service.current_subscriber_id,
+            )
 
     future.add_done_callback(_completed)
 
@@ -116,6 +212,12 @@ def _toggle_forwarding():
         with _report_lock:
             _schedule_send(_report_builder.release_all())
         log.info("⏸ FORWARDING MUTED: Keystrokes stay on Laptop (Press F12 to resume)")
+    if _ble_service:
+        _write_state(
+            status="connected" if _ble_service.has_subscribers else "advertising",
+            connected=_ble_service.has_subscribers,
+            subscriber_id=_ble_service.current_subscriber_id,
+        )
 
 
 async def _send_shortcut_coro(shortcut: str, hold_duration: float = 0.05) -> bool:
@@ -291,19 +393,32 @@ def _on_key_release(key):
 
 
 def _write_pid():
-    """Write current process PID to file for CLI management."""
-    pid_str = str(os.getpid())
-    for path in (PID_FILE, LEGACY_PID_FILE):
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(pid_str)
-        except Exception as e:
-            log.warning(f"Could not write PID file ({path}): {e}")
+    """Write verified process identity to PID file for safe CLI management."""
+    pid = os.getpid()
+    create_time = _get_process_create_time(pid)
+    payload = {
+        "pid": pid,
+        "create_time": create_time,
+        "executable": sys.executable,
+        "start_time": time.time(),
+    }
+    try:
+        with open(PID_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+    except Exception as e:
+        log.warning(f"Could not write PID file ({PID_FILE}): {e}")
+
+    # Legacy file for backwards compatibility with external scripts
+    try:
+        with open(LEGACY_PID_FILE, "w", encoding="utf-8") as f:
+            f.write(str(pid))
+    except Exception as e:
+        log.warning(f"Could not write legacy PID file ({LEGACY_PID_FILE}): {e}")
 
 
 def _remove_pid():
-    """Remove PID files on clean exit."""
-    for path in (PID_FILE, LEGACY_PID_FILE):
+    """Remove PID and state files on clean exit."""
+    for path in (PID_FILE, LEGACY_PID_FILE, STATE_FILE):
         try:
             if os.path.exists(path):
                 os.remove(path)
@@ -315,25 +430,38 @@ async def _main():
     global _ble_service, _loop
     _loop = asyncio.get_running_loop()
 
+    if not _acquire_instance_mutex():
+        print("\n  ❌ Another AirKeys process is already running on this machine.\n")
+        return 1
+
     # Callback when phone connects/subscribes
-    def on_subscriber_change(has_sub: bool):
+    def on_subscriber_change(has_sub: bool, subscriber_id=None):
         if has_sub:
-            log.info("✓ Phone CONNECTED & SUBSCRIBED! Keyboard is live.")
+            sub_info = f" (Device: {subscriber_id})" if subscriber_id else ""
+            log.info(f"✓ Phone CONNECTED & SUBSCRIBED!{sub_info} Keyboard is live.")
+            _write_state(status="connected", connected=True, subscriber_id=subscriber_id)
         else:
             log.info("Phone disconnected or unsubscribed.")
             with _report_lock:
                 _report_builder.release_all()
+            _write_state(status="advertising", connected=False, subscriber_id=None)
 
     _ble_service = BleHidService(on_subscriber_change=on_subscriber_change)
     try:
         await _ble_service.start()
     except Exception as e:
         log.error(f"Failed to start BLE HID service: {e}")
+        try:
+            await _ble_service.stop()
+        except Exception:
+            pass
         _remove_pid()
+        _release_instance_mutex()
         return 1
 
     # Do not claim the service is running until Bluetooth advertising is ready.
     _write_pid()
+    _write_state(status="advertising", connected=False)
 
     if sys.stdout is not None:
         try:
@@ -403,16 +531,20 @@ async def _main():
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
+        # Immediate mute to reject any new keystrokes during shutdown
+        _is_forwarding_enabled = False
         listener.stop()
         if _ble_service:
             try:
                 with _report_lock:
-                    release_report = _report_builder.release_all()
-                await _ble_service.send_report(release_report)
+                    _report_builder.release_all()
+                # Actively ensure all keys are released with retries to prevent stuck keys
+                await _ble_service.ensure_keys_released(retries=3, delay=0.03)
                 await _ble_service.stop()
             except Exception as e:
                 log.warning(f"Error during BLE shutdown: {e}")
         _remove_pid()
+        _release_instance_mutex()
         for s_path in (STOP_FILE, LEGACY_STOP_FILE, CMD_FILE, LEGACY_CMD_FILE):
             if os.path.exists(s_path):
                 try:
