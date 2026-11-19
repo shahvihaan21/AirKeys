@@ -220,6 +220,22 @@ class TestBleHidService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.sent_reports, 1)
         self.assertEqual(service.failed_reports, 1)
 
+    async def test_session_status_active_and_closed(self):
+        service = self.module.BleHidService()
+        await service._create_hid_service()
+        characteristic = service._input_report_char
+        characteristic.mock_results = None
+
+        # Active session (GattSessionStatus.ACTIVE is 1)
+        active_client = types.SimpleNamespace(session=types.SimpleNamespace(session_status=types.SimpleNamespace(value=1)))
+        characteristic.subscribed_clients = types.SimpleNamespace(size=1, get_at=lambda idx: active_client)
+        self.assertTrue(await service.send_report(b"\x00" * 8))
+
+        # Closed session (GattSessionStatus.CLOSED is 0)
+        closed_client = types.SimpleNamespace(session=types.SimpleNamespace(session_status=types.SimpleNamespace(value=0)))
+        characteristic.subscribed_clients = types.SimpleNamespace(size=1, get_at=lambda idx: closed_client)
+        self.assertFalse(await service.send_report(b"\x00" * 8))
+
     async def test_descriptor_requires_authenticated_encryption(self):
         service = self.module.BleHidService()
         await service._create_hid_service()

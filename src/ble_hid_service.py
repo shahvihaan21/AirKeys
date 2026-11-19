@@ -30,7 +30,7 @@ from winrt.windows.storage.streams import DataWriter
 
 from hid_report import KEYBOARD_REPORT_MAP, build_shortcut_reports, text_to_hid_reports
 
-log = logging.getLogger("ble_hid")
+log = logging.getLogger("airkeys.ble_hid")
 
 # ---- Standard BLE UUIDs ----
 UUID_HID_SERVICE        = _uuid.UUID("00001812-0000-1000-8000-00805f9b34fb")
@@ -183,7 +183,7 @@ class BleHidService:
                     return False
 
                 # Verify active sessions if accessible
-                active_count = 0
+                all_closed = True
                 for i in range(subscribers.size):
                     client = (
                         subscribers.get_at(i)
@@ -191,15 +191,21 @@ class BleHidService:
                         else (subscribers[i] if hasattr(subscribers, "__getitem__") else None)
                     )
                     if client is not None:
-                        session = getattr(client, "session", None)
-                        if session is not None:
-                            status = getattr(session, "session_status", None)
-                            if status is not None and getattr(status, "value", status) != 0:
-                                continue
-                    active_count += 1
+                        try:
+                            session = getattr(client, "session", None)
+                            if session is not None:
+                                status = getattr(session, "session_status", None)
+                                # In WinRT: GattSessionStatus.CLOSED == 0, GattSessionStatus.ACTIVE == 1
+                                status_val = getattr(status, "value", int(status) if isinstance(status, int) else None)
+                                if status_val == 0:  # Explicitly CLOSED
+                                    continue
+                        except Exception:
+                            pass
+                    all_closed = False
+                    break
 
-                if active_count == 0 and subscribers.size > 0:
-                    log.warning("No active GATT sessions found among subscribers.")
+                if all_closed and subscribers.size > 0:
+                    log.warning("No active GATT sessions found among subscribers (all sessions closed).")
                     self._failed_reports += 1
                     return False
 
